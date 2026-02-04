@@ -1,0 +1,42 @@
+# Example Configuration for Decentralized P2P
+# You can modify these parameters and use them as templates
+
+# Training Mode
+type: decentralized
+
+# Training Parameters
+rounds: 30
+epochs: 5
+num_clients: 20
+
+# Model Selection
+model: simple_cnn  # Options: simple_cnn, lenet5, resnet18, resnet50
+
+# Dataset
+dataset: cifar10  # Options: mnist, cifar10, fashion_mnist
+data_dir: ./data
+
+# Data Partitioning
+partition: dirichlet  # Options: iid, dirichlet, pathological
+alpha: 0.3  # For dirichlet partitioning (lower = more heterogeneous)
+classes_per_client: 2  # For pathological partitioning
+
+# Optimizer Parameters
+lr: 0.01
+momentum: 0.9
+weight_decay: 0.0
+batch_size: 32
+
+# Decentralized Topology Parameters
+main_link_prob: 1.0  # Probability of main bridge link activation
+border_link_prob: 1.0  # Probability of border links activation
+intra_cluster_prob: 0.8  # Probability of intra-cluster links
+
+# System Parameters
+no_cuda: false
+num_workers: 0
+seed: 42
+
+# Logging
+log_dir: ./logs
+experiment_name: decentralized_p2p_two_clusters
