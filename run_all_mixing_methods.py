@@ -12,9 +12,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 from src.decentralized.topology import create_two_cluster_topology
 
 # Configuration - QUICK TEST
-NUM_CLIENTS = 40
-ROUNDS = 1
-EPOCHS = 1
+NUM_CLIENTS = 6
+ROUNDS = 2
+EPOCHS = 2
 DATASET = "cifar10"
 MAIN_LINK_PROB = 1.0
 BORDER_LINK_PROB = 1.0
@@ -93,6 +93,12 @@ for i, (method, description) in enumerate(methods, 1):
 end_time = datetime.now()
 total_duration = (end_time - start_time).total_seconds() / 60
 
+# Clean up temporary topology file
+print("\nCleaning up temporary files...")
+if shared_topology_path.exists():
+    shared_topology_path.unlink()
+    print(f"Deleted: {shared_topology_path}")
+
 # Print summary
 print("\n" + "="*70)
 print("EXECUTION SUMMARY")
@@ -102,7 +108,6 @@ for method, description, status, exp_name in results:
     print(f"{description:30s} {status:20s} logs/{exp_name}/")
 
 print(f"\nTotal time: {total_duration:.1f} minutes")
-print(f"Shared topology: {shared_topology_path}")
 print("="*70)
 
 # Print analysis instructions

@@ -41,6 +41,10 @@ data/
 logs/
 !logs/.gitkeep
 
+# Generated topology files (temporary)
+shared_topology.pkl
+shared_topology.gpickle
+
 # IDE
 .vscode/
 .idea/
