@@ -20,12 +20,13 @@ def create_two_cluster_topology(
     border_link_prob: float = 1.0,
     intra_cluster_prob: float = 0.8
 ) -> nx.Graph:
-    """Create a two-cluster network topology.
+    """Create a symmetrical two-cluster network topology.
     
-    This creates two densely connected clusters with a bridge connection between them.
+    This creates two identically structured clusters with a bridge connection between them.
+    The clusters are perfectly symmetrical - they have the same internal structure.
     
     Args:
-        num_clients: Total number of clients
+        num_clients: Total number of clients (should be even for perfect symmetry)
         main_link_prob: Probability of main bridge link activation
         border_link_prob: Probability of border links activation
         intra_cluster_prob: Probability of edges within clusters
@@ -39,40 +40,49 @@ def create_two_cluster_topology(
     G = nx.Graph()
     G.add_nodes_from(range(num_clients))
     
-    # Split into two clusters
+    # Split into two clusters evenly
     cluster_size = num_clients // 2
     cluster1 = list(range(cluster_size))
     cluster2 = list(range(cluster_size, num_clients))
     
-    # Create dense connections within each cluster
-    for cluster in [cluster1, cluster2]:
-        for i in cluster:
-            for j in cluster:
-                if i < j and np.random.random() < intra_cluster_prob:
-                    G.add_edge(i, j, probability_selection=intra_cluster_prob)
+    print(f"Creating symmetrical clusters: Cluster 0 ({len(cluster1)} clients), Cluster 1 ({len(cluster2)} clients)")
+    
+    # Generate edges for cluster 1 first, then mirror to cluster 2 for perfect symmetry
+    cluster1_edges = []
+    for i in range(len(cluster1)):
+        for j in range(i + 1, len(cluster1)):
+            if np.random.random() < intra_cluster_prob:
+                cluster1_edges.append((i, j))
+    
+    # Add cluster 1 edges (using actual node IDs)
+    for i, j in cluster1_edges:
+        G.add_edge(cluster1[i], cluster1[j], probability_selection=intra_cluster_prob)
+    
+    # Mirror edges to cluster 2 (maintaining symmetry)
+    for i, j in cluster1_edges:
+        G.add_edge(cluster2[i], cluster2[j], probability_selection=intra_cluster_prob)
     
     # Find center nodes (highest degree in each cluster)
+    # Due to symmetry, centers will be at the same relative position
     cluster1_degrees = [(node, G.degree(node)) for node in cluster1]
     cluster2_degrees = [(node, G.degree(node)) for node in cluster2]
     
     center1 = max(cluster1_degrees, key=lambda x: x[1])[0]
     center2 = max(cluster2_degrees, key=lambda x: x[1])[0]
     
-    # Add main bridge link between centers
+    print(f"  Cluster 0 center: Client {center1} (degree {G.degree(center1)})")
+    print(f"  Cluster 1 center: Client {center2} (degree {G.degree(center2)})")
+    
+    # Add ONLY ONE bridge link between the two clusters (connecting centers)
     G.add_edge(center1, center2, probability_selection=main_link_prob)
+    print(f"  Bridge link: {center1}-{center2} (single connection between clusters)")
     
-    # Find border nodes (neighbors of centers)
-    neighbors1 = [n for n in G.neighbors(center1) if n in cluster1]
-    neighbors2 = [n for n in G.neighbors(center2) if n in cluster2]
-    
-    # Add border links if we have neighbors
-    if neighbors1 and neighbors2:
-        border1 = neighbors1[0]
-        border2 = neighbors2[0]
-        
-        # Add edge between border nodes
-        if not G.has_edge(border1, border2):
-            G.add_edge(border1, border2, probability_selection=border_link_prob)
+    # Verify symmetry
+    cluster1_edge_count = len([(u, v) for u, v in G.edges() if u in cluster1 and v in cluster1])
+    cluster2_edge_count = len([(u, v) for u, v in G.edges() if u in cluster2 and v in cluster2])
+    inter_cluster_edges = len([(u, v) for u, v in G.edges() if (u in cluster1 and v in cluster2) or (u in cluster2 and v in cluster1)])
+    print(f"  Internal edges: Cluster 0 = {cluster1_edge_count}, Cluster 1 = {cluster2_edge_count}")
+    print(f"  Inter-cluster edges: {inter_cluster_edges}")
     
     return G
 

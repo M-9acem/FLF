@@ -44,6 +44,33 @@ class P2PRunner:
         self.cluster_assignments = self._compute_clusters()
         
         print(f"P2P Runner initialized with mixing method: {mixing_method}")
+    
+    def save_topology_visualization(self, output_dir: str, experiment_name: str = "p2p_topology"):
+        """Save network topology as interactive HTML.
+        
+        Args:
+            output_dir: Directory to save the visualization
+            experiment_name: Name for the output file
+        """
+        from pathlib import Path
+        from src.utils.visualization import plot_network_topology, save_topology_info
+        
+        output_path = Path(output_dir) / experiment_name
+        
+        # Save interactive HTML visualization
+        plot_network_topology(
+            graph=self.graph,
+            output_path=str(output_path),
+            title=f"P2P Network Topology - {self.mixing_method}",
+            cluster_assignments=self.cluster_assignments
+        )
+        
+        # Save topology information
+        save_topology_info(
+            graph=self.graph,
+            output_dir=Path(output_dir),
+            cluster_assignments=self.cluster_assignments
+        )
         
     def _compute_clusters(self) -> Dict[int, int]:
         """Compute cluster assignment for each client (for two-cluster topology).
@@ -115,6 +142,9 @@ class P2PRunner:
                 # 4. Gradient norm of each client per round
                 # 5. Gradient changes per round of each client
                 
+                # Get cluster assignment for this client
+                cluster_id = self.cluster_assignments.get(client.client_id)
+                
                 # Log to CSV
                 self.logger.log_p2p_round_metrics(
                     client_id=client.client_id,
@@ -123,7 +153,8 @@ class P2PRunner:
                     test_loss=test_loss,
                     gradient_norm=grad_norm,
                     gradient_change=gradient_change,
-                    class_metrics=class_metrics
+                    class_metrics=class_metrics,
+                    cluster_id=cluster_id
                 )
             
             print(f"Client {client.client_id}: Loss={metrics['final_loss']:.4f}, Acc={metrics['final_accuracy']:.2f}%")

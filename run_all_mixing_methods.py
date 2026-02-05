@@ -1,21 +1,50 @@
 #!/usr/bin/env python
-"""Run all mixing methods sequentially for comparison."""
+"""Run all mixing methods sequentially for comparison using the same topology."""
 
 import subprocess
 import sys
 from datetime import datetime
+import pickle
+from pathlib import Path
+
+# Add src to path for imports
+sys.path.insert(0, str(Path(__file__).parent))
+from src.decentralized.topology import create_two_cluster_topology
 
 # Configuration - QUICK TEST
-NUM_CLIENTS = 4
+NUM_CLIENTS = 40
 ROUNDS = 1
 EPOCHS = 1
 DATASET = "cifar10"
+MAIN_LINK_PROB = 1.0
+BORDER_LINK_PROB = 1.0
+INTRA_CLUSTER_PROB = 0.8
 
 print("="*70)
 print("RUNNING ALL MIXING METHODS SEQUENTIALLY")
 print("="*70)
 print(f"Configuration: {NUM_CLIENTS} clients, {ROUNDS} rounds, {EPOCHS} epochs")
 print(f"Dataset: {DATASET}")
+print("="*70)
+
+# Generate the topology ONCE
+print("\n" + "="*70)
+print("GENERATING SHARED TOPOLOGY (used by all methods)")
+print("="*70)
+graph = create_two_cluster_topology(
+    num_clients=NUM_CLIENTS,
+    main_link_prob=MAIN_LINK_PROB,
+    border_link_prob=BORDER_LINK_PROB,
+    intra_cluster_prob=INTRA_CLUSTER_PROB
+)
+
+# Save topology to a file that all experiments will use
+shared_topology_path = Path("shared_topology.pkl")
+with open(shared_topology_path, 'wb') as f:
+    pickle.dump(graph, f)
+print(f"\nTopology saved to: {shared_topology_path}")
+print(f"Graph: {graph.number_of_nodes()} nodes, {graph.number_of_edges()} edges")
+print("All mixing methods will use this same topology!")
 print("="*70)
 
 methods = [
@@ -43,7 +72,8 @@ for i, (method, description) in enumerate(methods, 1):
         "--rounds", str(ROUNDS),
         "--epochs", str(EPOCHS),
         "--dataset", DATASET,
-        "--experiment_name", experiment_name
+        "--experiment_name", experiment_name,
+        "--topology_file", str(shared_topology_path)
     ]
     
     method_start = datetime.now()
@@ -72,6 +102,7 @@ for method, description, status, exp_name in results:
     print(f"{description:30s} {status:20s} logs/{exp_name}/")
 
 print(f"\nTotal time: {total_duration:.1f} minutes")
+print(f"Shared topology: {shared_topology_path}")
 print("="*70)
 
 # Print analysis instructions

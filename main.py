@@ -251,14 +251,23 @@ def run_decentralized(args):
     )
     
     # Create topology
-    print(f"Creating two-cluster topology...")
-    graph = create_two_cluster_topology(
-        num_clients=args.num_clients,
-        main_link_prob=args.main_link_prob,
-        border_link_prob=args.border_link_prob,
-        intra_cluster_prob=args.intra_cluster_prob
-    )
-    print(f"Graph: {graph.number_of_nodes()} nodes, {graph.number_of_edges()} edges")
+    if args.topology_file:
+        # Load pre-generated topology
+        print(f"Loading pre-generated topology from: {args.topology_file}")
+        import pickle
+        with open(args.topology_file, 'rb') as f:
+            graph = pickle.load(f)
+        print(f"Loaded graph: {graph.number_of_nodes()} nodes, {graph.number_of_edges()} edges")
+    else:
+        # Create new topology
+        print(f"Creating two-cluster topology...")
+        graph = create_two_cluster_topology(
+            num_clients=args.num_clients,
+            main_link_prob=args.main_link_prob,
+            border_link_prob=args.border_link_prob,
+            intra_cluster_prob=args.intra_cluster_prob
+        )
+        print(f"Graph: {graph.number_of_nodes()} nodes, {graph.number_of_edges()} edges")
     
     # Create clients
     print(f"Initializing {args.num_clients} P2P clients...")
@@ -287,6 +296,13 @@ def run_decentralized(args):
         mixing_method=args.mixing_method
     )
     
+    # Save network topology visualization
+    print("\nGenerating network topology visualization...")
+    runner.save_topology_visualization(
+        output_dir=logger.get_log_dir(),
+        experiment_name="network_topology"
+    )
+    
     # Train
     print(f"\nStarting training: {args.rounds} rounds, {args.epochs} local epochs")
     print("-" * 60)
@@ -301,6 +317,8 @@ def run_decentralized(args):
     print(f"Simplified P2P metrics logged to:")
     print(f"  - p2p_metrics.csv (overall metrics per client per round)")
     print(f"  - p2p_per_class_metrics.csv (per-class metrics)")
+    print(f"  - network_topology.html (interactive network visualization)")
+    print(f"  - topology_info.txt (network statistics)")
 
 
 def main():
@@ -364,6 +382,7 @@ def main():
     parser.add_argument('--main_link_prob', type=float, default=1.0, help='Main bridge link probability')
     parser.add_argument('--border_link_prob', type=float, default=1.0, help='Border link probability')
     parser.add_argument('--intra_cluster_prob', type=float, default=0.8, help='Intra-cluster link probability')
+    parser.add_argument('--topology_file', type=str, default=None, help='Path to pre-generated topology file (.pkl)')
     parser.add_argument(
         '--mixing_method',
         type=str,

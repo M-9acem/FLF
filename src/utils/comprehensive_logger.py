@@ -596,7 +596,8 @@ class ComprehensiveLogger:
         test_loss: float,
         gradient_norm: float,
         gradient_change: float,
-        class_metrics: Dict[int, Dict[str, float]]
+        class_metrics: Dict[int, Dict[str, float]],
+        cluster_id: int = None
     ):
         """Simplified logging method for P2P decentralized experiments.
         
@@ -615,6 +616,7 @@ class ComprehensiveLogger:
             gradient_norm: L2 norm of gradients
             gradient_change: Change in gradient norm from previous round
             class_metrics: Per-class metrics dictionary
+            cluster_id: Cluster identifier (0 or 1 for two-cluster topology, None otherwise)
         """
         # Create simplified CSV file if not exists
         p2p_file = self.exp_dir / "p2p_metrics.csv"
@@ -622,7 +624,7 @@ class ComprehensiveLogger:
             with open(p2p_file, 'w', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow([
-                    'client_id', 'round', 
+                    'client_id', 'round', 'cluster_id',
                     'test_accuracy', 'test_loss',
                     'gradient_norm', 'gradient_change'
                 ])
@@ -631,7 +633,7 @@ class ComprehensiveLogger:
         with open(p2p_file, 'a', newline='') as f:
             writer = csv.writer(f)
             writer.writerow([
-                client_id, round_num,
+                client_id, round_num, cluster_id,
                 test_accuracy, test_loss,
                 gradient_norm, gradient_change
             ])
@@ -642,7 +644,7 @@ class ComprehensiveLogger:
             with open(p2p_class_file, 'w', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow([
-                    'client_id', 'round', 'class_id',
+                    'client_id', 'round', 'cluster_id', 'class_id',
                     'class_accuracy', 'class_precision', 'class_recall', 'class_f1_score'
                 ])
         
@@ -651,7 +653,7 @@ class ComprehensiveLogger:
             writer = csv.writer(f)
             for class_id, metrics in class_metrics.items():
                 writer.writerow([
-                    client_id, round_num, class_id,
+                    client_id, round_num, cluster_id, class_id,
                     metrics.get('accuracy', 0.0),
                     metrics.get('precision', 0.0),
                     metrics.get('recall', 0.0),
