@@ -5,10 +5,10 @@ import subprocess
 import sys
 from datetime import datetime
 
-# Configuration
-NUM_CLIENTS = 10
-ROUNDS = 15
-EPOCHS = 5
+# Configuration - QUICK TEST
+NUM_CLIENTS = 4
+ROUNDS = 1
+EPOCHS = 1
 DATASET = "cifar10"
 
 print("="*70)

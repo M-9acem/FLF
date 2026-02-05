@@ -193,8 +193,11 @@ class P2PClient:
         # Update model
         self.set_state({k: v.to(self.device) for k, v in aggregated_state.items()})
     
-    def evaluate(self) -> Dict[str, any]:
+    def evaluate(self, compute_per_class_metrics: bool = False) -> Dict[str, any]:
         """Evaluate the model on test data.
+        
+        Args:
+            compute_per_class_metrics: Whether to compute precision/recall/F1 per class
         
         Returns:
             Dictionary with evaluation metrics
@@ -211,6 +214,10 @@ class P2PClient:
         class_correct = [0] * num_classes
         class_total = [0] * num_classes
         
+        # For sklearn metrics
+        all_targets = []
+        all_preds = []
+        
         with torch.no_grad():
             for data, target in self.test_loader:
                 data, target = data.to(self.device), target.to(self.device)
@@ -221,6 +228,11 @@ class P2PClient:
                 pred = output.argmax(dim=1)
                 correct += pred.eq(target).sum().item()
                 total += target.size(0)
+                
+                # Store for sklearn metrics
+                if compute_per_class_metrics:
+                    all_targets.extend(target.cpu().numpy())
+                    all_preds.extend(pred.cpu().numpy())
                 
                 # Per-class accuracy
                 for i in range(len(target)):
@@ -239,9 +251,32 @@ class P2PClient:
             else:
                 class_accuracies[i] = 0.0
         
-        return {
+        result = {
             'client_id': self.client_id,
             'loss': avg_loss,
             'accuracy': accuracy,
             'class_accuracies': class_accuracies
         }
+        
+        # Add comprehensive per-class metrics if requested
+        if compute_per_class_metrics and len(all_targets) > 0:
+            from sklearn.metrics import precision_recall_fscore_support
+            
+            precision, recall, f1, support = precision_recall_fscore_support(
+                all_targets, all_preds, average=None, zero_division=0
+            )
+            
+            class_metrics = {}
+            for class_id in range(num_classes):
+                class_metrics[class_id] = {
+                    'accuracy': class_accuracies.get(class_id, 0.0),
+                    'precision': float(precision[class_id]) * 100,
+                    'recall': float(recall[class_id]) * 100,
+                    'f1_score': float(f1[class_id]) * 100,
+                    'samples': int(support[class_id]),
+                    'correct_predictions': class_correct[class_id]
+                }
+            
+            result['class_metrics'] = class_metrics
+        
+        return result

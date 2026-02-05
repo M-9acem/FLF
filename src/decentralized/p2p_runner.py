@@ -244,10 +244,9 @@ class P2PRunner:
                 
                 self.logger.log_data_distribution(
                     client_id=client.client_id,
-                    round_num=0,
                     class_distribution=class_dist,
                     total_samples=total_samples,
-                    heterogeneity_score=kl_divergence
+                    data_heterogeneity_score=kl_divergence
                 )
         
         for round_num in range(1, num_rounds + 1):
