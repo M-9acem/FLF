@@ -13,22 +13,24 @@ import torch
 class ComprehensiveLogger:
     """Ultra-comprehensive logger tracking all FL metrics as requested."""
     
-    def __init__(self, log_dir: str, experiment_name: str = "experiment"):
+    def __init__(self, log_dir: str, experiment_name: str = "experiment", mode: str = "centralized"):
         """Initialize the comprehensive metrics logger.
         
         Args:
             log_dir: Base directory for logs
             experiment_name: Name of the experiment
+            mode: 'centralized' or 'decentralized' - determines which files to create
         """
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         self.exp_dir = Path(log_dir) / experiment_name / timestamp
         self.exp_dir.mkdir(parents=True, exist_ok=True)
+        self.mode = mode
         
         # Create subdirectories
         self.plots_dir = self.exp_dir / "plots"
         self.plots_dir.mkdir(exist_ok=True)
         
-        # Initialize all log files
+        # Initialize log files based on mode
         self._init_log_files()
         
         # In-memory storage
@@ -47,7 +49,14 @@ class ComprehensiveLogger:
         }
         
     def _init_log_files(self):
-        """Initialize all CSV files with headers."""
+        """Initialize CSV files with headers based on mode."""
+        
+        if self.mode == "decentralized":
+            # For P2P: Don't create any CSV files here
+            # They'll be created on-demand by log_p2p_round_metrics()
+            return
+        
+        # For centralized: Create all comprehensive logging files
         # 1. Per-Client, Per-Round, Per-Epoch Metrics
         self.per_client_file = self.exp_dir / "per_client_metrics.csv"
         with open(self.per_client_file, 'w', newline='') as f:
@@ -574,4 +583,77 @@ class ComprehensiveLogger:
     
     def get_plots_dir(self) -> str:
         """Get the plots directory path."""
-        return str(self.plots_dir)
+        return str(self.plots_dir)    
+    # ===================================================================
+    # SIMPLIFIED P2P LOGGING METHOD
+    # ===================================================================
+    
+    def log_p2p_round_metrics(
+        self,
+        client_id: int,
+        round_num: int,
+        test_accuracy: float,
+        test_loss: float,
+        gradient_norm: float,
+        gradient_change: float,
+        class_metrics: Dict[int, Dict[str, float]]
+    ):
+        """Simplified logging method for P2P decentralized experiments.
+        
+        Logs only 5 essential metrics:
+        1. Accuracy of each client overall for each round
+        2. Accuracy of each client per class for each round
+        3. Loss per round of each client
+        4. Gradient norm of each client per round
+        5. Gradient changes per round of each client
+        
+        Args:
+            client_id: Client identifier
+            round_num: Round number
+            test_accuracy: Overall test accuracy for this client
+            test_loss: Test loss for this client
+            gradient_norm: L2 norm of gradients
+            gradient_change: Change in gradient norm from previous round
+            class_metrics: Per-class metrics dictionary
+        """
+        # Create simplified CSV file if not exists
+        p2p_file = self.exp_dir / "p2p_metrics.csv"
+        if not p2p_file.exists():
+            with open(p2p_file, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    'client_id', 'round', 
+                    'test_accuracy', 'test_loss',
+                    'gradient_norm', 'gradient_change'
+                ])
+        
+        # Log overall metrics
+        with open(p2p_file, 'a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                client_id, round_num,
+                test_accuracy, test_loss,
+                gradient_norm, gradient_change
+            ])
+        
+        # Create per-class CSV file if not exists
+        p2p_class_file = self.exp_dir / "p2p_per_class_metrics.csv"
+        if not p2p_class_file.exists():
+            with open(p2p_class_file, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    'client_id', 'round', 'class_id',
+                    'class_accuracy', 'class_precision', 'class_recall', 'class_f1_score'
+                ])
+        
+        # Log per-class metrics
+        with open(p2p_class_file, 'a', newline='') as f:
+            writer = csv.writer(f)
+            for class_id, metrics in class_metrics.items():
+                writer.writerow([
+                    client_id, round_num, class_id,
+                    metrics.get('accuracy', 0.0),
+                    metrics.get('precision', 0.0),
+                    metrics.get('recall', 0.0),
+                    metrics.get('f1_score', 0.0)
+                ])

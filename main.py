@@ -207,7 +207,8 @@ def run_decentralized(args):
     # Initialize logger
     logger = MetricsLogger(
         log_dir=args.log_dir,
-        experiment_name=args.experiment_name or "decentralized_p2p"
+        experiment_name=args.experiment_name or "decentralized_p2p",
+        mode="decentralized"
     )
     print(f"Logging to: {logger.get_log_dir()}")
     
@@ -295,64 +296,11 @@ def run_decentralized(args):
     
     # Generate final report
     print("\nGenerating final summary report...")
-    
-    # Extract necessary data from logger's all_metrics
-    # For decentralized, we don't have a single "global" accuracy, so use network average
-    round_summaries = logger.all_metrics.get('round_summaries', [])
-    per_client_metrics = logger.all_metrics.get('per_client_metrics', [])
-    propagation_metrics = logger.all_metrics.get('propagation_metrics', [])
-    
-    # Find best average accuracy across rounds
-    best_avg_accuracy = 0.0
-    best_round = 0
-    if round_summaries:
-        for summary in round_summaries:
-            if summary.get('accuracy_mean', 0) > best_avg_accuracy:
-                best_avg_accuracy = summary['accuracy_mean']
-                best_round = summary['round']
-    
-    # Get final per-client accuracies (last round, last epoch)
-    final_per_client_accuracies = {}
-    if per_client_metrics:
-        last_round = max(m['round'] for m in per_client_metrics)
-        for metric in per_client_metrics:
-            if metric['round'] == last_round:
-                client_id = metric['client_id']
-                # Get the most recent entry for this client in the final round
-                if client_id not in final_per_client_accuracies:
-                    final_per_client_accuracies[client_id] = metric.get('train_accuracy', 0.0)
-    
-    # Calculate total communication overhead (sum of all communication times)
-    total_communication_overhead = 0.0
-    if propagation_metrics:
-        # Sum all communication times across all rounds and clients
-        for metric in propagation_metrics:
-            # Assuming each gossip round has some time cost
-            # Use a simple estimate if not explicitly tracked
-            total_communication_overhead += 0.01  # placeholder
-    
-    # Calculate average propagation delay and hop count if available
-    avg_propagation_delay = None
-    avg_hop_count = None
-    if propagation_metrics:
-        delays = [m.get('avg_message_delay', 0) for m in propagation_metrics if 'avg_message_delay' in m]
-        hops = [m.get('avg_hop_count', 0) for m in propagation_metrics if 'avg_hop_count' in m]
-        if delays:
-            avg_propagation_delay = sum(delays) / len(delays)
-        if hops:
-            avg_hop_count = sum(hops) / len(hops)
-    
-    logger.save_final_report(
-        best_global_accuracy=best_avg_accuracy,
-        best_round=best_round,
-        final_per_client_accuracies=final_per_client_accuracies,
-        total_training_time=total_training_time,
-        total_communication_overhead=total_communication_overhead,
-        avg_propagation_delay=avg_propagation_delay,
-        avg_hop_count=avg_hop_count
-    )
-    
+    print(f"Training completed in {total_training_time:.2f} seconds")
     print(f"\nResults saved to: {logger.get_log_dir()}")
+    print(f"Simplified P2P metrics logged to:")
+    print(f"  - p2p_metrics.csv (overall metrics per client per round)")
+    print(f"  - p2p_per_class_metrics.csv (per-class metrics)")
 
 
 def main():

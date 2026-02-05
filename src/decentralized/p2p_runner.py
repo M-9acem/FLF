@@ -69,6 +69,13 @@ class P2PRunner:
         """
         print(f"\n=== Round {round_num} ===")
         
+        # Store previous gradients for computing gradient changes
+        prev_gradients = {}
+        if round_num > 1:
+            for client in self.clients:
+                if hasattr(client, 'prev_gradient_norm'):
+                    prev_gradients[client.client_id] = client.prev_gradient_norm
+        
         # Phase 1: Local training
         print("Phase 1: Local training...")
         client_states = {}
@@ -81,29 +88,43 @@ class P2PRunner:
             client_states[client.client_id] = client.get_state()
             client_losses.append(metrics['final_loss'])
             client_accuracies.append(metrics['final_accuracy'])
-            gradient_norms_list.append(metrics['gradient_norms'][-1])
             
-            # Log per-client metrics with comprehensive logger
+            # Get gradient norm
+            grad_norm = metrics['gradient_norms'][-1]
+            gradient_norms_list.append(grad_norm)
+            
+            # Compute gradient change if available
+            gradient_change = 0.0
+            if client.client_id in prev_gradients:
+                gradient_change = abs(grad_norm - prev_gradients[client.client_id])
+            
+            # Store current gradient for next round
+            client.prev_gradient_norm = grad_norm
+            
+            # SIMPLIFIED LOGGING: Only log what was requested
             if self.logger:
-                for epoch_idx, (loss, acc, grad_norm) in enumerate(
-                    zip(metrics['losses'], metrics['accuracies'], metrics['gradient_norms'])
-                ):
-                    self.logger.log_per_client_metrics(
-                        client_id=client.client_id,
-                        round_num=round_num,
-                        epoch=epoch_idx,
-                        train_loss=loss,
-                        train_accuracy=acc
-                    )
-                
-                # Evaluate and log per-class metrics
+                # 1. Accuracy of each client overall for each round (test accuracy)
                 test_metrics = client.evaluate(compute_per_class_metrics=True)
-                if 'class_metrics' in test_metrics:
-                    self.logger.log_per_class_metrics(
-                        client_id=client.client_id,
-                        round_num=round_num,
-                        class_metrics=test_metrics['class_metrics']
-                    )
+                test_accuracy = test_metrics['accuracy']
+                test_loss = test_metrics['loss']
+                
+                # 2. Accuracy of each client per class for each round
+                class_metrics = test_metrics.get('class_metrics', {})
+                
+                # 3. Loss per round of each client (test loss)
+                # 4. Gradient norm of each client per round
+                # 5. Gradient changes per round of each client
+                
+                # Log to CSV
+                self.logger.log_p2p_round_metrics(
+                    client_id=client.client_id,
+                    round_num=round_num,
+                    test_accuracy=test_accuracy,
+                    test_loss=test_loss,
+                    gradient_norm=grad_norm,
+                    gradient_change=gradient_change,
+                    class_metrics=class_metrics
+                )
             
             print(f"Client {client.client_id}: Loss={metrics['final_loss']:.4f}, Acc={metrics['final_accuracy']:.2f}%")
         
@@ -121,7 +142,7 @@ class P2PRunner:
             method=self.mixing_method
         )
         
-        # Share models with neighbors and log comprehensive propagation metrics
+        # Share models with neighbors (simplified - no detailed propagation logging)
         communication_start = time.time()
         for client in self.clients:
             neighbors = list(self.graph.neighbors(client.client_id))
@@ -131,38 +152,6 @@ class P2PRunner:
             neighbor_states = {}
             for neighbor_id in active_neighbors:
                 neighbor_states[neighbor_id] = client_states[neighbor_id]
-                
-                # Log comprehensive propagation metrics
-                if self.logger:
-                    # Simulate propagation delay (ms)
-                    prop_delay = np.random.exponential(15.0)  
-                    
-                    # Compute hop count (shortest path in graph)
-                    try:
-                        hop_count = nx.shortest_path_length(self.graph, client.client_id, neighbor_id)
-                    except:
-                        hop_count = 1
-                    
-                    # Check if inter-cluster communication
-                    source_cluster = self.cluster_assignments.get(client.client_id, 0)
-                    dest_cluster = self.cluster_assignments.get(neighbor_id, 0)
-                    inter_cluster = (source_cluster != dest_cluster)
-                    
-                    # Estimate model size in bytes (rough estimate)
-                    bytes_transferred = sum(p.numel() * 4 for p in client.model.parameters())  # 4 bytes per float32
-                    
-                    self.logger.log_propagation_metrics(
-                        round_num=round_num,
-                        client_id=client.client_id,
-                        source_client_id=client.client_id,
-                        destination_client_id=neighbor_id,
-                        propagation_delay=prop_delay,
-                        hop_count=hop_count,
-                        cluster_id=source_cluster,
-                        inter_cluster_communication=inter_cluster,
-                        model_version=round_num,
-                        bytes_transferred=bytes_transferred
-                    )
             
             # Store neighbor models
             client.store_neighbor_models(neighbor_states)
@@ -196,15 +185,6 @@ class P2PRunner:
         
         print(f"Average - Loss: {avg_loss:.4f}, Acc: {avg_accuracy:.2f}% (±{std_accuracy:.2f}%)")
         
-        # Log round summary
-        if self.logger:
-            self.logger.log_round_summary(
-                round_num,
-                eval_accuracies,
-                eval_losses,
-                gradient_norms_list
-            )
-        
         return {
             'round': round_num,
             'client_losses': client_losses,
@@ -223,32 +203,6 @@ class P2PRunner:
             num_rounds: Number of federated rounds
             local_epochs: Local epochs per round
         """
-        # Log data distribution before training
-        if self.logger:
-            print("\nComputing initial data distribution...")
-            for client in self.clients:
-                # Get class distribution from client's training data
-                class_counts = {}
-                for _, labels in client.train_loader:
-                    for label in labels:
-                        label_item = label.item()
-                        class_counts[label_item] = class_counts.get(label_item, 0) + 1
-                
-                total_samples = sum(class_counts.values())
-                class_dist = {k: v / total_samples for k, v in class_counts.items()}
-                
-                # Compute heterogeneity score (KL divergence from uniform)
-                num_classes = len(class_dist)
-                uniform_prob = 1.0 / num_classes
-                kl_divergence = sum(p * np.log(p / uniform_prob) for p in class_dist.values() if p > 0)
-                
-                self.logger.log_data_distribution(
-                    client_id=client.client_id,
-                    class_distribution=class_dist,
-                    total_samples=total_samples,
-                    data_heterogeneity_score=kl_divergence
-                )
-        
         for round_num in range(1, num_rounds + 1):
             self.train_round(round_num, local_epochs)
         
