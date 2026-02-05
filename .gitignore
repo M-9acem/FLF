@@ -59,3 +59,6 @@ Thumbs.db
 # Misc
 *.log
 .cache/
+
+#Server files
+Run_cyclic.sh

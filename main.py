@@ -8,7 +8,7 @@ import random
 from pathlib import Path
 
 from src.models import SimpleCNN, LeNet5, ResNet18, ResNet50
-from src.utils import ComprehensiveLogger as MetricsLogger, get_dataset, partition_data, create_dataloaders
+from src.utils import ComprehensiveLogger, get_dataset, partition_data, create_dataloaders
 from src.centralized import FedAvgClient, FedAvgServer
 from src.decentralized import P2PClient, P2PRunner, create_two_cluster_topology
 
@@ -64,9 +64,10 @@ def run_centralized(args):
     set_seed(args.seed)
     
     # Initialize logger
-    logger = MetricsLogger(
+    logger = ComprehensiveLogger(
         log_dir=args.log_dir,
-        experiment_name=args.experiment_name or "centralized_fedavg"
+        experiment_name=args.experiment_name or "centralized_fedavg",
+        mode="centralized"
     )
     print(f"Logging to: {logger.get_log_dir()}")
     
@@ -147,44 +148,13 @@ def run_centralized(args):
     
     # Generate final report
     print("\nGenerating final summary report...")
-    
-    # Extract necessary data from logger's all_metrics
-    global_metrics = logger.all_metrics.get('global_metrics', [])
-    per_client_metrics = logger.all_metrics.get('per_client_metrics', [])
-    
-    # Find best global accuracy
-    best_global_accuracy = 0.0
-    best_round = 0
-    if global_metrics:
-        for metric in global_metrics:
-            if metric.get('global_test_accuracy', 0) > best_global_accuracy:
-                best_global_accuracy = metric['global_test_accuracy']
-                best_round = metric['round']
-    
-    # Get final per-client accuracies (last round, last epoch)
-    final_per_client_accuracies = {}
-    if per_client_metrics:
-        last_round = max(m['round'] for m in per_client_metrics)
-        for metric in per_client_metrics:
-            if metric['round'] == last_round:
-                client_id = metric['client_id']
-                # Get the most recent entry for this client in the final round
-                if client_id not in final_per_client_accuracies:
-                    final_per_client_accuracies[client_id] = metric.get('train_accuracy', 0.0)
-    
-    # Calculate total communication overhead (in centralized, this is simpler)
-    # Each round has one upload and one download per client
-    total_communication_overhead = 0.0  # Can be refined based on actual measurements
-    
-    logger.save_final_report(
-        best_global_accuracy=best_global_accuracy,
-        best_round=best_round,
-        final_per_client_accuracies=final_per_client_accuracies,
-        total_training_time=total_training_time,
-        total_communication_overhead=total_communication_overhead
-    )
-    
+    print(f"Training completed in {total_training_time:.2f} seconds")
     print(f"\nResults saved to: {logger.get_log_dir()}")
+    print(f"Simplified centralized metrics logged to:")
+    print(f"  - centralized_global_metrics.csv (global model metrics per round)")
+    print(f"  - centralized_global_per_class_metrics.csv (global model per-class metrics)")
+    print(f"  - centralized_client_metrics.csv (per-client metrics per round)")
+    print(f"  - centralized_client_per_class_metrics.csv (per-client per-class metrics)")
 
 
 def run_decentralized(args):
@@ -205,7 +175,7 @@ def run_decentralized(args):
     set_seed(args.seed)
     
     # Initialize logger
-    logger = MetricsLogger(
+    logger = ComprehensiveLogger(
         log_dir=args.log_dir,
         experiment_name=args.experiment_name or "decentralized_p2p",
         mode="decentralized"

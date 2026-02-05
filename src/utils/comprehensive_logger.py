@@ -56,7 +56,12 @@ class ComprehensiveLogger:
             # They'll be created on-demand by log_p2p_round_metrics()
             return
         
-        # For centralized: Create all comprehensive logging files
+        if self.mode == "centralized":
+            # For centralized: Don't create comprehensive files here
+            # They'll be created on-demand by log_centralized_* methods
+            return
+        
+        # Legacy comprehensive logging (unused, kept for backward compatibility)
         # 1. Per-Client, Per-Round, Per-Epoch Metrics
         self.per_client_file = self.exp_dir / "per_client_metrics.csv"
         with open(self.per_client_file, 'w', newline='') as f:
@@ -655,6 +660,134 @@ class ComprehensiveLogger:
                 writer.writerow([
                     client_id, round_num, cluster_id, class_id,
                     metrics.get('accuracy', 0.0),
+                    metrics.get('precision', 0.0),
+                    metrics.get('recall', 0.0),
+                    metrics.get('f1_score', 0.0)
+                ])
+    
+    # ===================================================================
+    # SIMPLIFIED CENTRALIZED LOGGING METHODS
+    # ===================================================================
+    
+    def log_centralized_global_metrics(
+        self,
+        round_num: int,
+        test_accuracy: float,
+        test_loss: float,
+        gradient_norm: float,
+        gradient_change: float,
+        class_metrics: Dict[int, Dict[str, float]]
+    ):
+        """Simplified logging for centralized global model metrics.
+        
+        Args:
+            round_num: Round number
+            test_accuracy: Global model test accuracy
+            test_loss: Global model test loss  
+            gradient_norm: L2 norm of global model gradients
+            gradient_change: Change in gradient norm from previous round
+            class_metrics: Per-class metrics for global model
+        """
+        # Create global metrics file if not exists
+        global_file = self.exp_dir / "centralized_global_metrics.csv"
+        if not global_file.exists():
+            with open(global_file, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    'round', 'test_accuracy', 'test_loss',
+                    'gradient_norm', 'gradient_change'
+                ])
+        
+        # Log global metrics
+        with open(global_file, 'a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                round_num, test_accuracy, test_loss,
+                gradient_norm, gradient_change
+            ])
+        
+        # Create global per-class file if not exists
+        global_class_file = self.exp_dir / "centralized_global_per_class_metrics.csv"
+        if not global_class_file.exists():
+            with open(global_class_file, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    'round', 'class_id',
+                    'class_accuracy', 'class_loss',
+                    'class_precision', 'class_recall', 'class_f1_score'
+                ])
+        
+        # Log per-class metrics for global model
+        with open(global_class_file, 'a', newline='') as f:
+            writer = csv.writer(f)
+            for class_id, metrics in class_metrics.items():
+                writer.writerow([
+                    round_num, class_id,
+                    metrics.get('accuracy', 0.0),
+                    metrics.get('loss', 0.0),
+                    metrics.get('precision', 0.0),
+                    metrics.get('recall', 0.0),
+                    metrics.get('f1_score', 0.0)
+                ])
+    
+    def log_centralized_client_metrics(
+        self,
+        client_id: int,
+        round_num: int,
+        test_accuracy: float,
+        test_loss: float,
+        gradient_norm: float,
+        gradient_change: float,
+        class_metrics: Dict[int, Dict[str, float]]
+    ):
+        """Simplified logging for centralized client metrics.
+        
+        Args:
+            client_id: Client identifier
+            round_num: Round number
+            test_accuracy: Client test accuracy
+            test_loss: Client test loss
+            gradient_norm: L2 norm of client gradients
+            gradient_change: Change in gradient norm from previous round
+            class_metrics: Per-class metrics for client
+        """
+        # Create client metrics file if not exists
+        client_file = self.exp_dir / "centralized_client_metrics.csv"
+        if not client_file.exists():
+            with open(client_file, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    'client_id', 'round', 'test_accuracy', 'test_loss',
+                    'gradient_norm', 'gradient_change'
+                ])
+        
+        # Log client metrics
+        with open(client_file, 'a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                client_id, round_num, test_accuracy, test_loss,
+                gradient_norm, gradient_change
+            ])
+        
+        # Create client per-class file if not exists
+        client_class_file = self.exp_dir / "centralized_client_per_class_metrics.csv"
+        if not client_class_file.exists():
+            with open(client_class_file, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    'client_id', 'round', 'class_id',
+                    'class_accuracy', 'class_loss',
+                    'class_precision', 'class_recall', 'class_f1_score'
+                ])
+        
+        # Log per-class metrics for client
+        with open(client_class_file, 'a', newline='') as f:
+            writer = csv.writer(f)
+            for class_id, metrics in class_metrics.items():
+                writer.writerow([
+                    client_id, round_num, class_id,
+                    metrics.get('accuracy', 0.0),
+                    metrics.get('loss', 0.0),
                     metrics.get('precision', 0.0),
                     metrics.get('recall', 0.0),
                     metrics.get('f1_score', 0.0)
