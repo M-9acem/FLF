@@ -12,9 +12,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 from src.decentralized.topology import create_two_cluster_topology
 
 # Configuration - QUICK TEST
-NUM_CLIENTS = 4
-ROUNDS = 1
-EPOCHS = 1
+NUM_CLIENTS = 40
+ROUNDS = 600
+EPOCHS = 6
 DATASET = "cifar10"
 MAIN_LINK_PROB = 1.0
 BORDER_LINK_PROB = 1.0
