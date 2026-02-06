@@ -2,8 +2,10 @@
 
 import torch
 import time
+from collections import defaultdict
 from typing import List, Dict
 import numpy as np
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from src.decentralized.p2p_client import P2PClient
 from src.decentralized.topology import (
     get_active_edges,
@@ -110,54 +112,84 @@ class P2PRunner:
         client_accuracies = []
         gradient_norms_list = []
         
-        for client in self.clients:
+        # Determine number of GPUs in use
+        unique_devices = list(set(c.device for c in self.clients))
+        num_workers = len(unique_devices)
+        
+        def _train_p2p_client(client):
+            """Train a single P2P client and return results."""
             metrics = client.train(epochs=local_epochs)
-            client_states[client.client_id] = client.get_state()
-            client_losses.append(metrics['final_loss'])
-            client_accuracies.append(metrics['final_accuracy'])
+            state = client.get_state()
             
-            # Get gradient norm
-            grad_norm = metrics['gradient_norms'][-1]
-            gradient_norms_list.append(grad_norm)
-            
-            # Compute gradient change if available
+            grad_norm = metrics['gradient_norms'][-1] if metrics['gradient_norms'] else 0.0
             gradient_change = 0.0
             if client.client_id in prev_gradients:
                 gradient_change = abs(grad_norm - prev_gradients[client.client_id])
-            
-            # Store current gradient for next round
             client.prev_gradient_norm = grad_norm
             
-            # SIMPLIFIED LOGGING: Only log what was requested
+            test_metrics = None
             if self.logger:
-                # 1. Accuracy of each client overall for each round (test accuracy)
                 test_metrics = client.evaluate(compute_per_class_metrics=True)
-                test_accuracy = test_metrics['accuracy']
-                test_loss = test_metrics['loss']
-                
-                # 2. Accuracy of each client per class for each round
-                class_metrics = test_metrics.get('class_metrics', {})
-                
-                # 3. Loss per round of each client (test loss)
-                # 4. Gradient norm of each client per round
-                # 5. Gradient changes per round of each client
-                
-                # Get cluster assignment for this client
+            
+            return {
+                'client_id': client.client_id,
+                'state': state,
+                'final_loss': metrics['final_loss'],
+                'final_accuracy': metrics['final_accuracy'],
+                'grad_norm': grad_norm,
+                'gradient_change': gradient_change,
+                'test_metrics': test_metrics
+            }
+        
+        if num_workers > 1:
+            # Group clients by device so each GPU is used by exactly one thread
+            gpu_groups = defaultdict(list)
+            for client in self.clients:
+                gpu_groups[str(client.device)].append(client)
+            
+            def _train_group(group_clients):
+                group_results = {}
+                for client in group_clients:
+                    result = _train_p2p_client(client)
+                    group_results[result['client_id']] = result
+                return group_results
+            
+            print(f"Training {len(self.clients)} clients in parallel across {len(gpu_groups)} GPU(s)...")
+            with ThreadPoolExecutor(max_workers=len(gpu_groups)) as executor:
+                futures = [
+                    executor.submit(_train_group, group)
+                    for group in gpu_groups.values()
+                ]
+                results = {}
+                for future in as_completed(futures):
+                    results.update(future.result())
+        else:
+            results = {}
+            for client in self.clients:
+                results[client.client_id] = _train_p2p_client(client)
+        
+        # Collect results in order
+        for client in self.clients:
+            result = results[client.client_id]
+            client_states[client.client_id] = result['state']
+            client_losses.append(result['final_loss'])
+            client_accuracies.append(result['final_accuracy'])
+            gradient_norms_list.append(result['grad_norm'])
+            
+            if self.logger and result['test_metrics']:
                 cluster_id = self.cluster_assignments.get(client.client_id)
-                
-                # Log to CSV
                 self.logger.log_p2p_round_metrics(
                     client_id=client.client_id,
                     round_num=round_num,
-                    test_accuracy=test_accuracy,
-                    test_loss=test_loss,
-                    gradient_norm=grad_norm,
-                    gradient_change=gradient_change,
-                    class_metrics=class_metrics,
+                    test_accuracy=result['test_metrics']['accuracy'],
+                    test_loss=result['test_metrics']['loss'],
+                    gradient_norm=result['grad_norm'],
+                    gradient_change=result['gradient_change'],
+                    class_metrics=result['test_metrics'].get('class_metrics', {}),
                     cluster_id=cluster_id
                 )
             
-            print(f"Client {client.client_id}: Loss={metrics['final_loss']:.4f}, Acc={metrics['final_accuracy']:.2f}%")
+            print(f"Client {client.client_id}: Loss={result['final_loss']:.4f}, Acc={result['final_accuracy']:.2f}%")
         
         # Phase 2: Gossip aggregation
         print("Phase 2: Gossip aggregation...")

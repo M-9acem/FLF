@@ -56,9 +56,15 @@ def run_centralized(args):
     print("CENTRALIZED FEDERATED LEARNING (FedAvg)")
     print("="*60)
     
-    # Set device
-    device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
-    print(f"Using device: {device}")
+    # Set device(s)
+    if torch.cuda.is_available() and not args.no_cuda:
+        num_gpus = torch.cuda.device_count()
+        devices = [torch.device(f"cuda:{i}") for i in range(num_gpus)]
+        print(f"Using {num_gpus} GPU(s): {[str(d) for d in devices]}")
+    else:
+        devices = [torch.device("cpu")]
+        print("Using device: cpu")
+    device = devices[0]  # Primary device for global model
     
     # Set seed
     set_seed(args.seed)
@@ -113,10 +119,11 @@ def run_centralized(args):
     print(f"Creating {args.model} model...")
     global_model = create_model(args.model, num_classes, num_channels)
     
-    # Create clients
-    print(f"Initializing {args.num_clients} clients...")
+    # Create clients (distributed across GPUs round-robin)
+    print(f"Initializing {args.num_clients} clients across {len(devices)} device(s)...")
     clients = []
     for i in range(args.num_clients):
+        client_device = devices[i % len(devices)]
         train_loader, test_loader = client_loaders[i]
         model = create_model(args.model, num_classes, num_channels)
         client = FedAvgClient(
@@ -124,12 +131,16 @@ def run_centralized(args):
             model=model,
             train_loader=train_loader,
             test_loader=test_loader,
-            device=device,
+            device=client_device,
             learning_rate=args.lr,
             momentum=args.momentum,
             weight_decay=args.weight_decay
         )
         clients.append(client)
+    if len(devices) > 1:
+        for d in devices:
+            count = sum(1 for c in clients if c.device == d)
+            print(f"  {d}: {count} clients")
     
     # Create server
     server = FedAvgServer(
@@ -167,9 +178,15 @@ def run_decentralized(args):
     print("DECENTRALIZED FEDERATED LEARNING (P2P)")
     print("="*60)
     
-    # Set device
-    device = torch.device("cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu")
-    print(f"Using device: {device}")
+    # Set device(s)
+    if torch.cuda.is_available() and not args.no_cuda:
+        num_gpus = torch.cuda.device_count()
+        devices = [torch.device(f"cuda:{i}") for i in range(num_gpus)]
+        print(f"Using {num_gpus} GPU(s): {[str(d) for d in devices]}")
+    else:
+        devices = [torch.device("cpu")]
+        print("Using device: cpu")
+    device = devices[0]  # Primary device
     
     # Set seed
     set_seed(args.seed)
@@ -239,10 +256,11 @@ def run_decentralized(args):
         )
         print(f"Graph: {graph.number_of_nodes()} nodes, {graph.number_of_edges()} edges")
     
-    # Create clients
-    print(f"Initializing {args.num_clients} P2P clients...")
+    # Create clients (distributed across GPUs round-robin)
+    print(f"Initializing {args.num_clients} P2P clients across {len(devices)} device(s)...")
     clients = []
     for i in range(args.num_clients):
+        client_device = devices[i % len(devices)]
         train_loader, test_loader = client_loaders[i]
         model = create_model(args.model, num_classes, num_channels)
         client = P2PClient(
@@ -250,12 +268,16 @@ def run_decentralized(args):
             model=model,
             train_loader=train_loader,
             test_loader=test_loader,
-            device=device,
+            device=client_device,
             learning_rate=args.lr,
             momentum=args.momentum,
             weight_decay=args.weight_decay
         )
         clients.append(client)
+    if len(devices) > 1:
+        for d in devices:
+            count = sum(1 for c in clients if c.device == d)
+            print(f"  {d}: {count} clients")
     
     # Create runner
     runner = P2PRunner(
@@ -316,7 +338,7 @@ def main():
     parser.add_argument(
         '--model',
         type=str,
-        default='simple_cnn',
+        default='lenet5',
         choices=['simple_cnn', 'lenet5', 'resnet18', 'resnet50'],
         help='Model architecture'
     )

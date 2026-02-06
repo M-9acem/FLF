@@ -20,6 +20,7 @@ def get_dataset(dataset_name: str = "cifar10", data_dir: str = "./data"):
     """
     if dataset_name.lower() == "mnist":
         transform = transforms.Compose([
+            transforms.Resize(32),
             transforms.ToTensor(),
             transforms.Normalize((0.5,), (0.5,))
         ])
@@ -44,6 +45,7 @@ def get_dataset(dataset_name: str = "cifar10", data_dir: str = "./data"):
         
     elif dataset_name.lower() == "fashion_mnist":
         transform = transforms.Compose([
+            transforms.Resize(32),
             transforms.ToTensor(),
             transforms.Normalize((0.5,), (0.5,))
         ])

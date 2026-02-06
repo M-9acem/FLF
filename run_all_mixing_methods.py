@@ -13,9 +13,9 @@ from src.decentralized.topology import create_two_cluster_topology
 
 # Configuration - QUICK TEST
 NUM_CLIENTS = 40
-ROUNDS = 600
-EPOCHS = 6
-DATASET = "cifar10"
+ROUNDS = 400
+EPOCHS = 4
+DATASET = "mnist"
 MAIN_LINK_PROB = 1.0
 BORDER_LINK_PROB = 1.0
 INTRA_CLUSTER_PROB = 0.8

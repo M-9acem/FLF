@@ -1,12 +1,15 @@
 """FedAvg server implementation."""
 
+import time
+from collections import defaultdict
+
 import torch
 import torch.nn as nn
 from typing import List, Dict
 import copy
 import numpy as np
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from src.centralized.client import FedAvgClient
-from src.utils.logger import MetricsLogger
 
 
 class FedAvgServer:
@@ -40,7 +43,9 @@ class FedAvgServer:
         """Send global model to all clients."""
         global_state = self.global_model.state_dict()
         for client in self.clients:
-            client.set_parameters(copy.deepcopy(global_state))
+            # Move state dict to client's device
+            client_state = {k: v.to(client.device) for k, v in copy.deepcopy(global_state).items()}
+            client.set_parameters(client_state)
     
     def aggregate(self, client_states: List[Dict[str, torch.Tensor]], client_weights: List[int]):
         """Aggregate client models using weighted averaging.
@@ -51,15 +56,15 @@ class FedAvgServer:
         """
         total_samples = sum(client_weights)
         
-        # Initialize aggregated state
+        # Initialize aggregated state on primary device
         aggregated_state = {}
         for key in client_states[0].keys():
-            aggregated_state[key] = torch.zeros_like(client_states[0][key])
+            aggregated_state[key] = torch.zeros_like(client_states[0][key], device=self.device)
         
-        # Weighted averaging
+        # Weighted averaging (move tensors to primary device)
         for state, weight in zip(client_states, client_weights):
             for key in state.keys():
-                aggregated_state[key] += state[key] * (weight / total_samples)
+                aggregated_state[key] += state[key].to(self.device) * (weight / total_samples)
         
         # Update global model
         self.global_model.load_state_dict(aggregated_state)
@@ -86,50 +91,110 @@ class FedAvgServer:
         client_accuracies = []
         gradient_norms_list = []
         
-        # Each client trains locally
-        for idx, client in enumerate(self.clients):
-            print(f"Training client {client.client_id}...", end=' ')
-            
-            # Store previous gradient for change calculation
+        # Determine number of GPUs in use
+        unique_devices = list(set(c.device for c in self.clients))
+        num_workers = len(unique_devices)
+        
+        def _train_client(client, local_epochs):
+            """Train a single client and return results."""
             prev_grad_norm = getattr(client, 'prev_gradient_norm', None)
-            
             metrics = client.train(epochs=local_epochs)
             
-            # Collect model updates
-            client_states.append(client.get_parameters())
-            client_weights.append(metrics['num_samples'])
-            client_losses.append(metrics['final_loss'])
-            client_accuracies.append(metrics['final_accuracy'])
-            
-            # Get gradient norm from last epoch
+            params = client.get_parameters()
             grad_norm = metrics['gradient_norms'][-1] if metrics['gradient_norms'] else 0.0
-            gradient_norms_list.append(grad_norm)
             
-            # Calculate gradient change
             gradient_change = 0.0
             if prev_grad_norm is not None:
                 gradient_change = abs(grad_norm - prev_grad_norm)
             client.prev_gradient_norm = grad_norm
             
-            # Evaluate client and log simplified metrics
+            test_metrics = None
             if self.logger:
                 test_metrics = client.evaluate(compute_per_class_metrics=True)
-                
-                self.logger.log_centralized_client_metrics(
-                    client_id=client.client_id,
-                    round_num=round_num,
-                    test_accuracy=test_metrics['accuracy'],
-                    test_loss=test_metrics['loss'],
-                    gradient_norm=grad_norm,
-                    gradient_change=gradient_change,
-                    class_metrics=test_metrics.get('class_metrics', {})
-                )
             
-            print(f"Loss: {metrics['final_loss']:.4f}, Acc: {metrics['final_accuracy']:.2f}%")
+            return {
+                'client': client,
+                'params': params,
+                'num_samples': metrics['num_samples'],
+                'final_loss': metrics['final_loss'],
+                'final_accuracy': metrics['final_accuracy'],
+                'grad_norm': grad_norm,
+                'gradient_change': gradient_change,
+                'test_metrics': test_metrics
+            }
+        
+        # Train clients in parallel (one thread per GPU)
+        if num_workers > 1:
+            # Group clients by device so each GPU is used by exactly one thread
+            gpu_groups = defaultdict(list)
+            for client in self.clients:
+                gpu_groups[str(client.device)].append(client)
+            
+            def _train_group(group_clients):
+                group_results = {}
+                for client in group_clients:
+                    result = _train_client(client, local_epochs)
+                    group_results[result['client'].client_id] = result
+                return group_results
+            
+            print(f"Training {len(self.clients)} clients in parallel across {len(gpu_groups)} GPU(s)...")
+            with ThreadPoolExecutor(max_workers=len(gpu_groups)) as executor:
+                futures = [
+                    executor.submit(_train_group, group)
+                    for group in gpu_groups.values()
+                ]
+                results = {}
+                for future in as_completed(futures):
+                    results.update(future.result())
+            
+            # Collect results in order
+            for client in self.clients:
+                result = results[client.client_id]
+                client_states.append(result['params'])
+                client_weights.append(result['num_samples'])
+                client_losses.append(result['final_loss'])
+                client_accuracies.append(result['final_accuracy'])
+                gradient_norms_list.append(result['grad_norm'])
+                
+                if self.logger and result['test_metrics']:
+                    self.logger.log_centralized_client_metrics(
+                        client_id=client.client_id,
+                        round_num=round_num,
+                        test_accuracy=result['test_metrics']['accuracy'],
+                        test_loss=result['test_metrics']['loss'],
+                        gradient_norm=result['grad_norm'],
+                        gradient_change=result['gradient_change'],
+                        class_metrics=result['test_metrics'].get('class_metrics', {})
+                    )
+                
+                print(f"Client {client.client_id} - Loss: {result['final_loss']:.4f}, Acc: {result['final_accuracy']:.2f}%")
+        else:
+            # Sequential training (single device)
+            for idx, client in enumerate(self.clients):
+                print(f"Training client {client.client_id}...", end=' ')
+                result = _train_client(client, local_epochs)
+                
+                client_states.append(result['params'])
+                client_weights.append(result['num_samples'])
+                client_losses.append(result['final_loss'])
+                client_accuracies.append(result['final_accuracy'])
+                gradient_norms_list.append(result['grad_norm'])
+                
+                if self.logger and result['test_metrics']:
+                    self.logger.log_centralized_client_metrics(
+                        client_id=client.client_id,
+                        round_num=round_num,
+                        test_accuracy=result['test_metrics']['accuracy'],
+                        test_loss=result['test_metrics']['loss'],
+                        gradient_norm=result['grad_norm'],
+                        gradient_change=result['gradient_change'],
+                        class_metrics=result['test_metrics'].get('class_metrics', {})
+                    )
+                
+                print(f"Loss: {result['final_loss']:.4f}, Acc: {result['final_accuracy']:.2f}%")
         
         # Aggregate models
         print("Aggregating models...")
-        import time
         agg_start = time.time()
         self.aggregate(client_states, client_weights)
         agg_time = time.time() - agg_start
@@ -229,14 +294,6 @@ class FedAvgServer:
             result['class_metrics'] = averaged_class_metrics
         
         return result
-        
-        avg_loss = total_loss / total_samples
-        avg_accuracy = 100.0 * total_correct / total_samples
-        
-        return {
-            'loss': avg_loss,
-            'accuracy': avg_accuracy
-        }
     
     def train(self, num_rounds: int, local_epochs: int = 1):
         """Train for multiple rounds.
