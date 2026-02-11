@@ -602,14 +602,16 @@ class ComprehensiveLogger:
         gradient_norm: float,
         gradient_change: float,
         class_metrics: Dict[int, Dict[str, float]],
-        cluster_id: int = None
+        cluster_id: int = None,
+        train_accuracy: float = None,
+        train_loss: float = None
     ):
         """Simplified logging method for P2P decentralized experiments.
         
-        Logs only 5 essential metrics:
-        1. Accuracy of each client overall for each round
-        2. Accuracy of each client per class for each round
-        3. Loss per round of each client
+        Logs essential metrics:
+        1. Training accuracy and loss per client per round
+        2. Test accuracy and loss per client per round
+        3. Accuracy per class of each client for each round
         4. Gradient norm of each client per round
         5. Gradient changes per round of each client
         
@@ -622,6 +624,8 @@ class ComprehensiveLogger:
             gradient_change: Change in gradient norm from previous round
             class_metrics: Per-class metrics dictionary
             cluster_id: Cluster identifier (0 or 1 for two-cluster topology, None otherwise)
+            train_accuracy: Training accuracy for this client (last epoch)
+            train_loss: Training loss for this client (last epoch)
         """
         # Create simplified CSV file if not exists
         p2p_file = self.exp_dir / "p2p_metrics.csv"
@@ -630,6 +634,7 @@ class ComprehensiveLogger:
                 writer = csv.writer(f)
                 writer.writerow([
                     'client_id', 'round', 'cluster_id',
+                    'train_accuracy', 'train_loss',
                     'test_accuracy', 'test_loss',
                     'gradient_norm', 'gradient_change'
                 ])
@@ -639,6 +644,7 @@ class ComprehensiveLogger:
             writer = csv.writer(f)
             writer.writerow([
                 client_id, round_num, cluster_id,
+                train_accuracy, train_loss,
                 test_accuracy, test_loss,
                 gradient_norm, gradient_change
             ])
@@ -676,7 +682,9 @@ class ComprehensiveLogger:
         test_loss: float,
         gradient_norm: float,
         gradient_change: float,
-        class_metrics: Dict[int, Dict[str, float]]
+        class_metrics: Dict[int, Dict[str, float]],
+        train_accuracy: float = None,
+        train_loss: float = None
     ):
         """Simplified logging for centralized global model metrics.
         
@@ -687,6 +695,8 @@ class ComprehensiveLogger:
             gradient_norm: L2 norm of global model gradients
             gradient_change: Change in gradient norm from previous round
             class_metrics: Per-class metrics for global model
+            train_accuracy: Average training accuracy across clients
+            train_loss: Average training loss across clients
         """
         # Create global metrics file if not exists
         global_file = self.exp_dir / "centralized_global_metrics.csv"
@@ -694,7 +704,8 @@ class ComprehensiveLogger:
             with open(global_file, 'w', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow([
-                    'round', 'test_accuracy', 'test_loss',
+                    'round', 'train_accuracy', 'train_loss',
+                    'test_accuracy', 'test_loss',
                     'gradient_norm', 'gradient_change'
                 ])
         
@@ -702,7 +713,8 @@ class ComprehensiveLogger:
         with open(global_file, 'a', newline='') as f:
             writer = csv.writer(f)
             writer.writerow([
-                round_num, test_accuracy, test_loss,
+                round_num, train_accuracy, train_loss,
+                test_accuracy, test_loss,
                 gradient_norm, gradient_change
             ])
         
@@ -738,7 +750,9 @@ class ComprehensiveLogger:
         test_loss: float,
         gradient_norm: float,
         gradient_change: float,
-        class_metrics: Dict[int, Dict[str, float]]
+        class_metrics: Dict[int, Dict[str, float]],
+        train_accuracy: float = None,
+        train_loss: float = None
     ):
         """Simplified logging for centralized client metrics.
         
@@ -750,6 +764,8 @@ class ComprehensiveLogger:
             gradient_norm: L2 norm of client gradients
             gradient_change: Change in gradient norm from previous round
             class_metrics: Per-class metrics for client
+            train_accuracy: Training accuracy for this client (last epoch)
+            train_loss: Training loss for this client (last epoch)
         """
         # Create client metrics file if not exists
         client_file = self.exp_dir / "centralized_client_metrics.csv"
@@ -757,7 +773,8 @@ class ComprehensiveLogger:
             with open(client_file, 'w', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow([
-                    'client_id', 'round', 'test_accuracy', 'test_loss',
+                    'client_id', 'round', 'train_accuracy', 'train_loss',
+                    'test_accuracy', 'test_loss',
                     'gradient_norm', 'gradient_change'
                 ])
         
@@ -765,7 +782,8 @@ class ComprehensiveLogger:
         with open(client_file, 'a', newline='') as f:
             writer = csv.writer(f)
             writer.writerow([
-                client_id, round_num, test_accuracy, test_loss,
+                client_id, round_num, train_accuracy, train_loss,
+                test_accuracy, test_loss,
                 gradient_norm, gradient_change
             ])
         

@@ -164,7 +164,9 @@ class FedAvgServer:
                         test_loss=result['test_metrics']['loss'],
                         gradient_norm=result['grad_norm'],
                         gradient_change=result['gradient_change'],
-                        class_metrics=result['test_metrics'].get('class_metrics', {})
+                        class_metrics=result['test_metrics'].get('class_metrics', {}),
+                        train_accuracy=result['final_accuracy'],
+                        train_loss=result['final_loss']
                     )
                 
                 print(f"Client {client.client_id} - Loss: {result['final_loss']:.4f}, Acc: {result['final_accuracy']:.2f}%")
@@ -188,7 +190,9 @@ class FedAvgServer:
                         test_loss=result['test_metrics']['loss'],
                         gradient_norm=result['grad_norm'],
                         gradient_change=result['gradient_change'],
-                        class_metrics=result['test_metrics'].get('class_metrics', {})
+                        class_metrics=result['test_metrics'].get('class_metrics', {}),
+                        train_accuracy=result['final_accuracy'],
+                        train_loss=result['final_loss']
                     )
                 
                 print(f"Loss: {result['final_loss']:.4f}, Acc: {result['final_accuracy']:.2f}%")
@@ -219,7 +223,9 @@ class FedAvgServer:
                 test_loss=global_metrics['loss'],
                 gradient_norm=global_grad_norm,
                 gradient_change=global_gradient_change,
-                class_metrics=global_metrics.get('class_metrics', {})
+                class_metrics=global_metrics.get('class_metrics', {}),
+                train_accuracy=np.mean(client_accuracies),
+                train_loss=np.mean(client_losses)
             )
         
         return {
