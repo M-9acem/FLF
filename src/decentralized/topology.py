@@ -13,6 +13,9 @@ except ImportError:
 # Type alias for mixing methods
 MixingMethod = Literal['metropolis_hastings', 'max_degree', 'jaccard', 'matcha']
 
+# Module-level cache for MATCHA weights (avoid re-solving CVX every round)
+_matcha_cache: Dict[int, np.ndarray] = {}
+
 
 def create_two_cluster_topology(
     num_clients: int,
@@ -276,7 +279,11 @@ def _get_optimal_probabilities(graph: nx.Graph, L: np.ndarray) -> Dict[Tuple[int
     # Solve
     problem = cp.Problem(objective, constraints)
     try:
-        problem.solve(solver=cp.CVXOPT, kktsolver=cp.ROBUST_KKTSOLVER)
+        # Try CVXOPT first, fall back to SCS (bundled with cvxpy)
+        try:
+            problem.solve(solver=cp.CVXOPT, kktsolver=cp.ROBUST_KKTSOLVER)
+        except (cp.error.SolverError, Exception):
+            problem.solve(solver=cp.SCS)
         
         if problem.status not in ["optimal", "optimal_inaccurate"]:
             # If optimization fails, use uniform probabilities
@@ -505,9 +512,31 @@ def _active_matcha(
 ) -> np.ndarray:
     """MATCHA with active edges only.
     
-    For dynamic edge activation, we fall back to simpler methods
-    since MATCHA optimization assumes a fixed graph.
+    Computes the full MATCHA mixing matrix once (cached), then for each
+    round keeps only active edge weights and redistributes inactive
+    weight to self-loops so rows still sum to 1.
     """
-    # MATCHA is designed for static graphs with probabilistic activation
-    # For active edge subsets, use Metropolis-Hastings
-    return _active_metropolis_hastings(graph, num_clients, active_edges)
+    global _matcha_cache
+    
+    # Compute full MATCHA weights once and cache by graph identity
+    cache_key = id(graph)
+    if cache_key not in _matcha_cache:
+        _matcha_cache[cache_key] = _matcha_weights(graph, num_clients)
+    
+    W_full = _matcha_cache[cache_key]
+    
+    # Build active mixing matrix: keep MATCHA weights for active edges only
+    W = np.zeros((num_clients, num_clients))
+    
+    for node in range(num_clients):
+        neighbors = list(graph.neighbors(node))
+        active_neighbors = [n for n in neighbors
+                            if active_edges.get((node, n), False)]
+        
+        for neighbor in active_neighbors:
+            W[node, neighbor] = W_full[node, neighbor]
+        
+        # Self-weight absorbs weight from inactive edges
+        W[node, node] = 1.0 - np.sum(W[node, :])
+    
+    return W
