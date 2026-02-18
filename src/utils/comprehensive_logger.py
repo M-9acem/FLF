@@ -588,7 +588,81 @@ class ComprehensiveLogger:
     
     def get_plots_dir(self) -> str:
         """Get the plots directory path."""
-        return str(self.plots_dir)    
+        return str(self.plots_dir)
+
+    # ===================================================================
+    # CLIENT FINAL WEIGHTS LOGGING
+    # ===================================================================
+
+    def save_client_final_weights(self, clients):
+        """Save all client model weights at the end of training.
+        
+        Creates two files:
+        1. client_final_weights.pt  - torch file with {client_id: state_dict} for exact comparison
+        2. client_weight_summary.csv - per-client per-layer statistics (norm, mean, std, min, max)
+        
+        Args:
+            clients: List of client objects with .client_id and .get_state() methods
+        """
+        # Collect all client state dicts
+        all_state_dicts = {}
+        for client in clients:
+            state = client.get_state()  # returns CPU state_dict copy
+            all_state_dicts[client.client_id] = state
+        
+        # Save torch file with full weights
+        pt_file = self.exp_dir / "client_final_weights.pt"
+        torch.save(all_state_dicts, str(pt_file))
+        
+        # Save CSV summary with per-layer statistics
+        csv_file = self.exp_dir / "client_weight_summary.csv"
+        with open(csv_file, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                'client_id', 'layer_name', 'shape', 'num_params',
+                'l2_norm', 'mean', 'std', 'min', 'max'
+            ])
+            for client_id in sorted(all_state_dicts.keys()):
+                state = all_state_dicts[client_id]
+                for layer_name, tensor in state.items():
+                    flat = tensor.float().flatten()
+                    writer.writerow([
+                        client_id,
+                        layer_name,
+                        str(list(tensor.shape)),
+                        flat.numel(),
+                        f"{flat.norm(2).item():.6f}",
+                        f"{flat.mean().item():.6f}",
+                        f"{flat.std().item():.6f}",
+                        f"{flat.min().item():.6f}",
+                        f"{flat.max().item():.6f}"
+                    ])
+        
+        # Save pairwise L2 distances between client models
+        client_ids = sorted(all_state_dicts.keys())
+        dist_file = self.exp_dir / "client_pairwise_distances.csv"
+        with open(dist_file, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['client_a', 'client_b', 'l2_distance', 'cosine_similarity'])
+            for i, id_a in enumerate(client_ids):
+                vec_a = torch.cat([v.float().flatten() for v in all_state_dicts[id_a].values()])
+                for id_b in client_ids[i+1:]:
+                    vec_b = torch.cat([v.float().flatten() for v in all_state_dicts[id_b].values()])
+                    l2_dist = (vec_a - vec_b).norm(2).item()
+                    cos_sim = torch.nn.functional.cosine_similarity(
+                        vec_a.unsqueeze(0), vec_b.unsqueeze(0)
+                    ).item()
+                    writer.writerow([
+                        id_a, id_b,
+                        f"{l2_dist:.6f}",
+                        f"{cos_sim:.6f}"
+                    ])
+        
+        print(f"Client final weights saved to: {self.exp_dir}")
+        print(f"  - client_final_weights.pt (full state dicts)")
+        print(f"  - client_weight_summary.csv (per-layer statistics)")
+        print(f"  - client_pairwise_distances.csv (model distances)")
+
     # ===================================================================
     # SIMPLIFIED P2P LOGGING METHOD
     # ===================================================================
@@ -604,7 +678,8 @@ class ComprehensiveLogger:
         class_metrics: Dict[int, Dict[str, float]],
         cluster_id: int = None,
         train_accuracy: float = None,
-        train_loss: float = None
+        train_loss: float = None,
+        weight_diff: float = 0.0
     ):
         """Simplified logging method for P2P decentralized experiments.
         
@@ -614,18 +689,20 @@ class ComprehensiveLogger:
         3. Accuracy per class of each client for each round
         4. Gradient norm of each client per round
         5. Gradient changes per round of each client
+        6. Weight difference (L2) before/after gossip aggregation
         
         Args:
             client_id: Client identifier
             round_num: Round number
             test_accuracy: Overall test accuracy for this client
             test_loss: Test loss for this client
-            gradient_norm: L2 norm of gradients
+            gradient_norm: L2 norm of gradients (concatenated gradient vector)
             gradient_change: Change in gradient norm from previous round
             class_metrics: Per-class metrics dictionary
             cluster_id: Cluster identifier (0 or 1 for two-cluster topology, None otherwise)
             train_accuracy: Training accuracy for this client (last epoch)
             train_loss: Training loss for this client (last epoch)
+            weight_diff: L2 norm of weight difference before/after gossip aggregation
         """
         # Create simplified CSV file if not exists
         p2p_file = self.exp_dir / "p2p_metrics.csv"
@@ -636,7 +713,8 @@ class ComprehensiveLogger:
                     'client_id', 'round', 'cluster_id',
                     'train_accuracy', 'train_loss',
                     'test_accuracy', 'test_loss',
-                    'gradient_norm', 'gradient_change'
+                    'gradient_norm', 'gradient_change',
+                    'weight_diff'
                 ])
         
         # Log overall metrics
@@ -646,7 +724,8 @@ class ComprehensiveLogger:
                 client_id, round_num, cluster_id,
                 train_accuracy, train_loss,
                 test_accuracy, test_loss,
-                gradient_norm, gradient_change
+                gradient_norm, gradient_change,
+                weight_diff
             ])
         
         # Create per-class CSV file if not exists

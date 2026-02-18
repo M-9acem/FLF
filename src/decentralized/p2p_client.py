@@ -111,13 +111,9 @@ class P2PClient:
                 loss = criterion(output, target)
                 loss.backward()
                 
-                # Calculate gradient norm
-                total_norm = 0.0
-                for p in self.model.parameters():
-                    if p.grad is not None:
-                        param_norm = p.grad.data.norm(2)
-                        total_norm += param_norm.item() ** 2
-                total_norm = total_norm ** 0.5
+                # Calculate gradient norm (flatten all grads into one vector)
+                grad_vec = torch.cat([p.grad.data.flatten() for p in self.model.parameters() if p.grad is not None])
+                total_norm = grad_vec.norm(2).item()
                 gradient_norms.append(total_norm)
                 
                 optimizer.step()
@@ -164,14 +160,20 @@ class P2PClient:
             'final_accuracy': epoch_accuracies[-1]
         }
     
-    def gossip_aggregate(self, weights: Dict[int, float]):
+    def gossip_aggregate(self, weights: Dict[int, float]) -> float:
         """Aggregate model with neighbors using gossip protocol.
         
         Args:
             weights: Dictionary mapping neighbor IDs to mixing weights
+            
+        Returns:
+            weight_diff: L2 norm of the parameter difference before/after aggregation
         """
         # Get current model state
         current_state = self.get_state()
+        
+        # Flatten pre-aggregation weights into a single vector
+        pre_vec = torch.cat([v.flatten().float() for v in current_state.values()])
         
         # Initialize aggregated state
         aggregated_state = {}
@@ -190,8 +192,16 @@ class P2PClient:
                 for key in current_state.keys():
                     aggregated_state[key] += neighbor_state[key] * weight
         
+        # Flatten post-aggregation weights into a single vector
+        post_vec = torch.cat([v.flatten().float() for v in aggregated_state.values()])
+        
+        # Compute L2 norm of weight difference (model divergence due to gossip)
+        weight_diff = (post_vec - pre_vec).norm(2).item()
+        
         # Update model
         self.set_state({k: v.to(self.device) for k, v in aggregated_state.items()})
+        
+        return weight_diff
     
     def evaluate(self, compute_per_class_metrics: bool = False) -> Dict[str, any]:
         """Evaluate the model on test data.

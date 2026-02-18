@@ -13,9 +13,10 @@ from src.decentralized.topology import create_two_cluster_topology
 
 # Configuration - QUICK TEST
 NUM_CLIENTS = 40
-ROUNDS = 400
-EPOCHS = 4
-DATASET = "mnist"
+ROUNDS = 500
+EPOCHS = 1
+GOSSIP_STEPS = 5  # Number of gossip iterations per round
+DATASET = "cifar10"
 MAIN_LINK_PROB = 1.0
 BORDER_LINK_PROB = 1.0
 INTRA_CLUSTER_PROB = 0.8
@@ -23,7 +24,7 @@ INTRA_CLUSTER_PROB = 0.8
 print("="*70)
 print("RUNNING ALL MIXING METHODS SEQUENTIALLY")
 print("="*70)
-print(f"Configuration: {NUM_CLIENTS} clients, {ROUNDS} rounds, {EPOCHS} epochs")
+print(f"Configuration: {NUM_CLIENTS} clients, {ROUNDS} rounds, {EPOCHS} epochs, {GOSSIP_STEPS} gossip steps/round")
 print(f"Dataset: {DATASET}")
 print("="*70)
 
@@ -49,8 +50,8 @@ print("="*70)
 
 methods = [
     ("metropolis_hastings", "Metropolis-Hastings (Default)"),
-    ("max_degree", "Max-Degree (Uniform Weights)"),
-    ("jaccard", "Jaccard Similarity"),
+    #("max_degree", "Max-Degree (Uniform Weights)"),
+    #("jaccard", "Jaccard Similarity"),
     ("matcha", "MATCHA (Optimal)")
 ]
 
@@ -72,8 +73,10 @@ for i, (method, description) in enumerate(methods, 1):
         "--rounds", str(ROUNDS),
         "--epochs", str(EPOCHS),
         "--dataset", DATASET,
+        "--model", "resnet18",
         "--experiment_name", experiment_name,
-        "--topology_file", str(shared_topology_path)
+        "--topology_file", str(shared_topology_path),
+        "--gossip_steps", str(GOSSIP_STEPS)
     ]
     
     method_start = datetime.now()
@@ -105,7 +108,7 @@ print("EXECUTION SUMMARY")
 print("="*70)
 
 for method, description, status, exp_name in results:
-    print(f"{description:30s} {status:20s} logs/{exp_name}/")
+    print(f"{description:30s} {status:20s} logs_test/{exp_name}/")
 
 print(f"\nTotal time: {total_duration:.1f} minutes")
 print("="*70)
@@ -116,7 +119,7 @@ print("NEXT STEPS - ANALYZE RESULTS")
 print("="*70)
 print("\n1. Compare results in logs/ directory:")
 for method, _, _, exp_name in results:
-    print(f"   - logs/{exp_name}/")
+    print(f"   - logs_test/{exp_name}/")
 
 print("\n2. Use analysis.ipynb to visualize each experiment")
 print("\n3. Compare convergence rates across methods:")

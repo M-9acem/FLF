@@ -24,7 +24,8 @@ class P2PRunner:
         graph: nx.Graph,
         logger = None,
         seed: int = 42,
-        mixing_method: MixingMethod = 'metropolis_hastings'
+        mixing_method: MixingMethod = 'metropolis_hastings',
+        gossip_steps: int = 1
     ):
         """Initialize P2P runner.
         
@@ -34,18 +35,20 @@ class P2PRunner:
             logger: Comprehensive metrics logger
             seed: Random seed for reproducibility
             mixing_method: Mixing method for gossip aggregation
+            gossip_steps: Number of gossip iterations per round (before next training)
         """
         self.clients = clients
         self.graph = graph
         self.logger = logger
         self.seed = seed
         self.mixing_method = mixing_method
+        self.gossip_steps = gossip_steps
         self.num_clients = len(clients)
         
         # Compute cluster assignments (for two-cluster topology)
         self.cluster_assignments = self._compute_clusters()
         
-        print(f"P2P Runner initialized with mixing method: {mixing_method}")
+        print(f"P2P Runner initialized with mixing method: {mixing_method}, gossip_steps: {gossip_steps}")
     
     def save_topology_visualization(self, output_dir: str, experiment_name: str = "p2p_topology"):
         """Save network topology as interactive HTML.
@@ -176,63 +179,78 @@ class P2PRunner:
             client_accuracies.append(result['final_accuracy'])
             gradient_norms_list.append(result['grad_norm'])
             
-            if self.logger and result['test_metrics']:
-                cluster_id = self.cluster_assignments.get(client.client_id)
-                self.logger.log_p2p_round_metrics(
-                    client_id=client.client_id,
-                    round_num=round_num,
-                    test_accuracy=result['test_metrics']['accuracy'],
-                    test_loss=result['test_metrics']['loss'],
-                    gradient_norm=result['grad_norm'],
-                    gradient_change=result['gradient_change'],
-                    class_metrics=result['test_metrics'].get('class_metrics', {}),
-                    cluster_id=cluster_id,
-                    train_accuracy=result['final_accuracy'],
-                    train_loss=result['final_loss']
-                )
-            
             print(f"Client {client.client_id}: Loss={result['final_loss']:.4f}, Acc={result['final_accuracy']:.2f}%")
         
-        # Phase 2: Gossip aggregation
-        print("Phase 2: Gossip aggregation...")
+        # Phase 2: Gossip aggregation (repeated gossip_steps times)
+        print(f"Phase 2: Gossip aggregation ({self.gossip_steps} step(s))...")
         
-        # Determine active edges for this round
-        active_edges = get_active_edges(self.graph, round_num, self.seed)
-        
-        # Create mixing matrix based on active edges and mixing method
-        W = get_active_mixing_matrix(
-            self.graph,
-            self.num_clients,
-            active_edges,
-            method=self.mixing_method
-        )
-        
-        # Share models with neighbors (simplified - no detailed propagation logging)
         communication_start = time.time()
-        for client in self.clients:
-            neighbors = list(self.graph.neighbors(client.client_id))
-            active_neighbors = [n for n in neighbors if active_edges.get((client.client_id, n), False)]
+        
+        # Accumulate total weight diff across all gossip steps
+        weight_diffs = {c.client_id: 0.0 for c in self.clients}
+        
+        for gossip_step in range(self.gossip_steps):
+            # Determine active edges for this round
+            active_edges = get_active_edges(self.graph, round_num, self.seed)
             
-            # Collect neighbor models
-            neighbor_states = {}
-            for neighbor_id in active_neighbors:
-                neighbor_states[neighbor_id] = client_states[neighbor_id]
+            # Create mixing matrix based on active edges and mixing method
+            W = get_active_mixing_matrix(
+                self.graph,
+                self.num_clients,
+                active_edges,
+                method=self.mixing_method
+            )
             
-            # Store neighbor models
-            client.store_neighbor_models(neighbor_states)
+            # Get fresh client states (updated after each gossip step)
+            if gossip_step > 0:
+                for client in self.clients:
+                    client_states[client.client_id] = client.get_state()
+            
+            # Share models with neighbors
+            for client in self.clients:
+                neighbors = list(self.graph.neighbors(client.client_id))
+                active_neighbors = [n for n in neighbors if active_edges.get((client.client_id, n), False)]
+                
+                # Collect neighbor models
+                neighbor_states = {}
+                for neighbor_id in active_neighbors:
+                    neighbor_states[neighbor_id] = client_states[neighbor_id]
+                
+                # Store neighbor models
+                client.store_neighbor_models(neighbor_states)
+            
+            # Perform gossip aggregation and accumulate weight differences
+            for client in self.clients:
+                weights = {}
+                for neighbor_id in range(self.num_clients):
+                    if W[client.client_id, neighbor_id] > 0:
+                        weights[neighbor_id] = W[client.client_id, neighbor_id]
+                
+                step_weight_diff = client.gossip_aggregate(weights)
+                weight_diffs[client.client_id] += step_weight_diff
         
         communication_time = time.time() - communication_start
         print(f"Communication took {communication_time:.2f}s")
         
-        # Perform gossip aggregation
-        for client in self.clients:
-            # Extract weights for this client
-            weights = {}
-            for neighbor_id in range(self.num_clients):
-                if W[client.client_id, neighbor_id] > 0:
-                    weights[neighbor_id] = W[client.client_id, neighbor_id]
-            
-            client.gossip_aggregate(weights)
+        # Log metrics (after gossip, so weight_diff is available)
+        if self.logger:
+            for client in self.clients:
+                result = results[client.client_id]
+                if result['test_metrics']:
+                    cluster_id = self.cluster_assignments.get(client.client_id)
+                    self.logger.log_p2p_round_metrics(
+                        client_id=client.client_id,
+                        round_num=round_num,
+                        test_accuracy=result['test_metrics']['accuracy'],
+                        test_loss=result['test_metrics']['loss'],
+                        gradient_norm=result['grad_norm'],
+                        gradient_change=result['gradient_change'],
+                        class_metrics=result['test_metrics'].get('class_metrics', {}),
+                        cluster_id=cluster_id,
+                        train_accuracy=result['final_accuracy'],
+                        train_loss=result['final_loss'],
+                        weight_diff=weight_diffs.get(client.client_id, 0.0)
+                    )
         
         # Phase 3: Evaluation
         print("Phase 3: Evaluation...")
@@ -272,3 +290,7 @@ class P2PRunner:
             self.train_round(round_num, local_epochs)
         
         print("\n=== Training Complete ===")
+        
+        # Save final client weights for comparison
+        if self.logger:
+            self.logger.save_client_final_weights(self.clients)

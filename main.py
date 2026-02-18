@@ -285,7 +285,8 @@ def run_decentralized(args):
         graph=graph,
         logger=logger,
         seed=args.seed,
-        mixing_method=args.mixing_method
+        mixing_method=args.mixing_method,
+        gossip_steps=args.gossip_steps
     )
     
     # Save network topology visualization
@@ -296,7 +297,10 @@ def run_decentralized(args):
     )
     
     # Train
-    print(f"\nStarting training: {args.rounds} rounds, {args.epochs} local epochs")
+    if args.gossip_steps > 1:
+        print(f"\nStarting training: {args.rounds} rounds, {args.epochs} local epochs, {args.gossip_steps} gossip steps/round")
+    else:
+        print(f"\nStarting training: {args.rounds} rounds, {args.epochs} local epochs")
     print("-" * 60)
     start_time = time.time()
     runner.train(num_rounds=args.rounds, local_epochs=args.epochs)
@@ -309,6 +313,9 @@ def run_decentralized(args):
     print(f"Simplified P2P metrics logged to:")
     print(f"  - p2p_metrics.csv (overall metrics per client per round)")
     print(f"  - p2p_per_class_metrics.csv (per-class metrics)")
+    print(f"  - client_final_weights.pt (full model state dicts)")
+    print(f"  - client_weight_summary.csv (per-layer weight statistics)")
+    print(f"  - client_pairwise_distances.csv (model distances)")
     print(f"  - network_topology.html (interactive network visualization)")
     print(f"  - topology_info.txt (network statistics)")
 
@@ -382,6 +389,7 @@ def main():
         choices=['metropolis_hastings', 'max_degree', 'jaccard', 'matcha'],
         help='Mixing matrix method for gossip aggregation'
     )
+    parser.add_argument('--gossip_steps', type=int, default=1, help='Number of gossip iterations per round before next training')
     
     # System parameters
     parser.add_argument('--no_cuda', action='store_true', help='Disable CUDA')

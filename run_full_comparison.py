@@ -54,9 +54,10 @@ def main():
         "python main.py "
         "--type centralized "
         "--num_clients 40 "
-        "--rounds 400 "
-        "--epochs 4 "
-        "--dataset mnist"
+        "--rounds 500 "
+        "--epochs 1 "
+        "--dataset cifar10 "
+        "--model resnet18"
     )
     
     centralized_success = run_command(

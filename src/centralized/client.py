@@ -110,13 +110,9 @@ class FedAvgClient:
                 loss = criterion(output, target)
                 loss.backward()
                 
-                # Calculate gradient norm
-                total_norm = 0.0
-                for p in self.model.parameters():
-                    if p.grad is not None:
-                        param_norm = p.grad.data.norm(2)
-                        total_norm += param_norm.item() ** 2
-                total_norm = total_norm ** 0.5
+                # Calculate gradient norm (flatten all grads into one vector)
+                grad_vec = torch.cat([p.grad.data.flatten() for p in self.model.parameters() if p.grad is not None])
+                total_norm = grad_vec.norm(2).item()
                 gradient_norms.append(total_norm)
                 
                 optimizer.step()
