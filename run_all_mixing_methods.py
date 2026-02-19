@@ -13,7 +13,7 @@ from src.decentralized.topology import create_two_cluster_topology
 
 # Configuration - QUICK TEST
 NUM_CLIENTS = 40
-ROUNDS = 500
+ROUNDS = 400
 EPOCHS = 1
 GOSSIP_STEPS = 5  # Number of gossip iterations per round
 DATASET = "cifar10"
@@ -50,8 +50,8 @@ print("="*70)
 
 methods = [
     ("metropolis_hastings", "Metropolis-Hastings (Default)"),
-    #("max_degree", "Max-Degree (Uniform Weights)"),
-    #("jaccard", "Jaccard Similarity"),
+    ("max_degree", "Max-Degree (Uniform Weights)"),
+    ("jaccard", "Jaccard Similarity"),
     ("matcha", "MATCHA (Optimal)")
 ]
 
@@ -73,7 +73,7 @@ for i, (method, description) in enumerate(methods, 1):
         "--rounds", str(ROUNDS),
         "--epochs", str(EPOCHS),
         "--dataset", DATASET,
-        "--model", "resnet18",
+        "--model", "resnet8",
         "--experiment_name", experiment_name,
         "--topology_file", str(shared_topology_path),
         "--gossip_steps", str(GOSSIP_STEPS)

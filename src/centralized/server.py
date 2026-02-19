@@ -59,15 +59,19 @@ class FedAvgServer:
         # Initialize aggregated state on primary device
         aggregated_state = {}
         for key in client_states[0].keys():
-            aggregated_state[key] = torch.zeros_like(client_states[0][key], device=self.device)
+            aggregated_state[key] = torch.zeros_like(client_states[0][key], dtype=torch.float32, device=self.device)
         
         # Weighted averaging (move tensors to primary device)
         for state, weight in zip(client_states, client_weights):
             for key in state.keys():
-                aggregated_state[key] += state[key].to(self.device) * (weight / total_samples)
+                aggregated_state[key] += state[key].float().to(self.device) * (weight / total_samples)
         
-        # Update global model
-        self.global_model.load_state_dict(aggregated_state)
+        # Update global model (cast back to original dtypes)
+        original_state = client_states[0]
+        self.global_model.load_state_dict({
+            k: v.to(dtype=original_state[k].dtype)
+            for k, v in aggregated_state.items()
+        })
     
     def train_round(self, round_num: int, local_epochs: int = 1) -> Dict[str, any]:
         """Execute one round of federated learning.

@@ -178,19 +178,19 @@ class P2PClient:
         # Initialize aggregated state
         aggregated_state = {}
         for key in current_state.keys():
-            aggregated_state[key] = torch.zeros_like(current_state[key])
+            aggregated_state[key] = torch.zeros_like(current_state[key], dtype=torch.float32)
         
         # Add weighted contributions from self and neighbors
         for neighbor_id, weight in weights.items():
             if neighbor_id == self.client_id:
                 # Self weight
                 for key in current_state.keys():
-                    aggregated_state[key] += current_state[key] * weight
+                    aggregated_state[key] += current_state[key].float() * weight
             elif neighbor_id in self.neighbor_models:
                 # Neighbor weight
                 neighbor_state = self.neighbor_models[neighbor_id]
                 for key in current_state.keys():
-                    aggregated_state[key] += neighbor_state[key] * weight
+                    aggregated_state[key] += neighbor_state[key].float() * weight
         
         # Flatten post-aggregation weights into a single vector
         post_vec = torch.cat([v.flatten().float() for v in aggregated_state.values()])
@@ -198,8 +198,11 @@ class P2PClient:
         # Compute L2 norm of weight difference (model divergence due to gossip)
         weight_diff = (post_vec - pre_vec).norm(2).item()
         
-        # Update model
-        self.set_state({k: v.to(self.device) for k, v in aggregated_state.items()})
+        # Update model (cast back to original dtypes, e.g. Long for num_batches_tracked)
+        self.set_state({
+            k: v.to(dtype=current_state[k].dtype, device=self.device)
+            for k, v in aggregated_state.items()
+        })
         
         return weight_diff
     

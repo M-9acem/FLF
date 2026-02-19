@@ -37,7 +37,7 @@ def main():
     print("\nConfiguration:")
     print("  - Clients: 40")
     print("  - Rounds: 400")
-    print("  - Epochs: 4")
+    print("  - Epochs: 1")
     print("="*80)
     
     # Step 1: Run decentralized experiments with all mixing methods
@@ -54,15 +54,15 @@ def main():
         "python main.py "
         "--type centralized "
         "--num_clients 40 "
-        "--rounds 500 "
+        "--rounds 400 "
         "--epochs 1 "
         "--dataset cifar10 "
-        "--model resnet18"
+        "--model resnet8"
     )
     
     centralized_success = run_command(
         centralized_cmd,
-        "Centralized (FedAvg) - 40 clients, 400 rounds, 4 epochs"
+        "Centralized (FedAvg) - 40 clients, 400 rounds, 1 epoch"
     )
     
     # Final summary

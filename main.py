@@ -7,7 +7,7 @@ import numpy as np
 import random
 from pathlib import Path
 
-from src.models import SimpleCNN, LeNet5, ResNet18, ResNet50
+from src.models import SimpleCNN, LeNet5, ResNet8, ResNet18, ResNet50
 from src.utils import ComprehensiveLogger, get_dataset, partition_data, create_dataloaders
 from src.centralized import FedAvgClient, FedAvgServer
 from src.decentralized import P2PClient, P2PRunner, create_two_cluster_topology
@@ -38,6 +38,8 @@ def create_model(model_name: str, num_classes: int, num_channels: int):
         return SimpleCNN(num_classes=num_classes, num_channels=num_channels)
     elif model_name.lower() == 'lenet5':
         return LeNet5(num_classes=num_classes, num_channels=num_channels)
+    elif model_name.lower() == 'resnet8':
+        return ResNet8(num_classes=num_classes, num_channels=num_channels)
     elif model_name.lower() == 'resnet18':
         return ResNet18(num_classes=num_classes, num_channels=num_channels)
     elif model_name.lower() == 'resnet50':
@@ -346,7 +348,7 @@ def main():
         '--model',
         type=str,
         default='lenet5',
-        choices=['simple_cnn', 'lenet5', 'resnet18', 'resnet50'],
+        choices=['simple_cnn', 'lenet5', 'resnet8', 'resnet18', 'resnet50'],
         help='Model architecture'
     )
     
