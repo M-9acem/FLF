@@ -21,7 +21,8 @@ def create_two_cluster_topology(
     num_clients: int,
     main_link_prob: float = 1.0,
     border_link_prob: float = 1.0,
-    intra_cluster_prob: float = 0.8
+    intra_cluster_prob: float = 0.8,
+    intra_cluster_communication: bool = True
 ) -> nx.Graph:
     """Create a symmetrical two-cluster network topology.
     
@@ -50,20 +51,30 @@ def create_two_cluster_topology(
     
     print(f"Creating symmetrical clusters: Cluster 0 ({len(cluster1)} clients), Cluster 1 ({len(cluster2)} clients)")
     
-    # Generate edges for cluster 1 first, then mirror to cluster 2 for perfect symmetry
-    cluster1_edges = []
-    for i in range(len(cluster1)):
-        for j in range(i + 1, len(cluster1)):
-            if np.random.random() < intra_cluster_prob:
-                cluster1_edges.append((i, j))
-    
-    # Add cluster 1 edges (using actual node IDs)
-    for i, j in cluster1_edges:
-        G.add_edge(cluster1[i], cluster1[j], probability_selection=intra_cluster_prob)
-    
-    # Mirror edges to cluster 2 (maintaining symmetry)
-    for i, j in cluster1_edges:
-        G.add_edge(cluster2[i], cluster2[j], probability_selection=intra_cluster_prob)
+    if intra_cluster_communication:
+        # All nodes in a cluster are interconnected (current behavior)
+        cluster1_edges = []
+        for i in range(len(cluster1)):
+            for j in range(i + 1, len(cluster1)):
+                if np.random.random() < intra_cluster_prob:
+                    cluster1_edges.append((i, j))
+        # Add cluster 1 edges (using actual node IDs)
+        for i, j in cluster1_edges:
+            G.add_edge(cluster1[i], cluster1[j], probability_selection=intra_cluster_prob)
+        # Mirror edges to cluster 2 (maintaining symmetry)
+        for i, j in cluster1_edges:
+            G.add_edge(cluster2[i], cluster2[j], probability_selection=intra_cluster_prob)
+    else:
+        # Only edge node in each cluster connects to others in the cluster (star topology)
+        # Choose the first node in each cluster as the edge node
+        edge1 = cluster1[0]
+        edge2 = cluster2[0]
+        for node in cluster1:
+            if node != edge1:
+                G.add_edge(edge1, node, probability_selection=intra_cluster_prob)
+        for node in cluster2:
+            if node != edge2:
+                G.add_edge(edge2, node, probability_selection=intra_cluster_prob)
     
     # Find center nodes (highest degree in each cluster)
     # Due to symmetry, centers will be at the same relative position

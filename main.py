@@ -254,7 +254,8 @@ def run_decentralized(args):
             num_clients=args.num_clients,
             main_link_prob=args.main_link_prob,
             border_link_prob=args.border_link_prob,
-            intra_cluster_prob=args.intra_cluster_prob
+            intra_cluster_prob=args.intra_cluster_prob,
+            intra_cluster_communication=args.intra_cluster_communication
         )
         print(f"Graph: {graph.number_of_nodes()} nodes, {graph.number_of_edges()} edges")
     
@@ -392,6 +393,11 @@ def main():
         help='Mixing matrix method for gossip aggregation'
     )
     parser.add_argument('--gossip_steps', type=int, default=1, help='Number of gossip iterations per round before next training')
+    parser.add_argument(
+        '--intra_cluster_communication',
+        action='store_true',
+        help='If set, all nodes in a cluster are interconnected (default). If not set, nodes in a cluster only communicate with the edge node.'
+    )
     
     # System parameters
     parser.add_argument('--no_cuda', action='store_true', help='Disable CUDA')
