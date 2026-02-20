@@ -38,30 +38,39 @@ The mixing matrix determines how clients weight their neighbors' models during g
    - May fall back to Metropolis-Hastings if graph is disconnected or optimization fails
 
 ### Models
-- SimpleCNN (default - PyTorch 60 Minute Blitz)
-- LeNet5 (for MNIST, Fashion-MNIST)
-- ResNet18 (for CIFAR-10)
-- ResNet50 (for CIFAR-10)
+- **SimpleCNN** (default): For CIFAR-10, MNIST, Fashion-MNIST
+- **LeNet5**: For MNIST, Fashion-MNIST
+- **ResNet8**: For CIFAR-10
+- **ResNet18**: For CIFAR-10
+- **ResNet50**: For CIFAR-10
+
+All models are implemented in `src/models/` and selectable via `--model`.
 
 ### Data Partitioning
-- **IID**: Random uniform distribution
-- **Non-IID Dirichlet**: Controlled heterogeneity with alpha parameter
-- **Non-IID Pathological**: Each client has limited classes
+- **IID**: Random uniform distribution (all clients get similar data)
+- **Non-IID Dirichlet**: Controlled heterogeneity with `--alpha` parameter (lower alpha = more heterogeneity)
+- **Non-IID Pathological**: Each client receives a fixed number of classes (`--classes_per_client`)
+
+Partitioning logic is in `src/utils/data_loader.py`.
 
 ### Comprehensive Metrics Logging
 - Per-client metrics (accuracy, loss, per-class performance)
 - Global model metrics (centralized mode)
+- Per-class metrics (all modes)
 - Gradient tracking (norms, variance)
 - Communication logs (decentralized mode)
 - Round-level aggregate statistics
+- Final client weights and statistics (for comparison)
 
 ### Visualization
-- Jupyter notebook with publication-ready plots
+- Jupyter notebook with publication-ready plots (`analysis_centralized_simple.ipynb`, `analysis_p2p_simple.ipynb`)
 - Training progress charts (accuracy/loss vs. rounds)
 - Per-class performance analysis
 - Gradient convergence analysis
 - Client convergence patterns
 - Communication matrix (decentralized mode)
+- Network topology visualization (HTML)
+- `--intra_cluster_communication`: If set, all nodes in a cluster are interconnected (default, fully connected cluster). If not set, only the edge node in each cluster communicates with the rest (star topology, no intra-cluster communication except via the edge node).
 
 ## Project Structure
 
@@ -162,14 +171,17 @@ python main.py --type decentralized --rounds 10 --epochs 5 --num_clients 10
 - `--batch_size`: Batch size (default: `32`)
 
 #### Decentralized-Specific Parameters
+
+- `--intra_cluster_communication`: If set, all nodes in a cluster are interconnected (default, fully connected cluster). If not set, only the edge node in each cluster communicates with the rest (star topology, no intra-cluster communication except via the edge node).
+
 - `--main_link_prob`: Probability of main bridge link activation (default: `1.0`)
 - `--border_link_prob`: Probability of border links activation (default: `1.0`)
 - `--intra_cluster_prob`: Probability of intra-cluster links (default: `0.8`)
 - `--mixing_method`: Mixing matrix method for gossip aggregation (default: `metropolis_hastings`)
-  - `metropolis_hastings`: Balanced weights based on node degrees (most common)
-  - `max_degree`: Uniform weights based on maximum degree in graph
-  - `jaccard`: Weights based on Jaccard similarity of neighborhoods
-  - `matcha`: Optimal weights via convex optimization (requires cvxpy)
+   - `metropolis_hastings`: Balanced weights based on node degrees (most common)
+   - `max_degree`: Uniform weights based on maximum degree in graph
+   - `jaccard`: Weights based on Jaccard similarity of neighborhoods
+   - `matcha`: Optimal weights via convex optimization (requires cvxpy)
 
 #### System Parameters
 - `--no_cuda`: Disable CUDA (use CPU only)
@@ -204,6 +216,12 @@ python main.py --type centralized --dataset cifar10 --partition pathological --c
 
 ```bash
 python main.py --type decentralized --num_clients 20 --rounds 30 --epochs 5 --main_link_prob 0.8 --border_link_prob 0.5 --intra_cluster_prob 0.9
+```
+
+#### 6. Decentralized with Star Topology (no intra-cluster communication except via edge node)
+
+```bash
+python main.py --type decentralized --num_clients 10 --rounds 10 --epochs 3 --intra_cluster_communication False
 ```
 
 #### 5. Decentralized with Different Mixing Methods
@@ -262,12 +280,16 @@ print(df_summary[['round', 'avg_accuracy', 'std_accuracy']])
 Each experiment creates the following files:
 
 - **client_metrics.csv**: Per-client, per-round, per-epoch metrics (accuracy, loss, class-specific)
+- **client_final_weights.pt**: All client weights at end of training (for comparison)
+- **client_final_stats.csv**: Per-client statistics at end of training
 - **global_metrics.csv**: Global model metrics per round (centralized mode only)
 - **gradient_tracking.csv**: Gradient norms and variance
 - **communication_logs.csv**: Network communication events (decentralized mode only)
 - **round_summary.csv**: Aggregated statistics per round (mean, std, min, max)
 - **config.json**: Experiment configuration for reproducibility
 - **plots/**: Generated visualization plots (PNG format)
+- **network_topology.html**: Interactive network visualization (decentralized mode)
+- All features listed above are implemented and tested in the codebase. See `src/` for full logic and `requirements.txt` for dependencies.
 
 ## Tips and Best Practices
 
