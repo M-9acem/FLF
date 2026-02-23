@@ -36,7 +36,8 @@ graph = create_two_cluster_topology(
     num_clients=NUM_CLIENTS,
     main_link_prob=MAIN_LINK_PROB,
     border_link_prob=BORDER_LINK_PROB,
-    intra_cluster_prob=INTRA_CLUSTER_PROB
+    intra_cluster_prob=INTRA_CLUSTER_PROB,
+    intra_cluster_communication=False  # Set to False for star topology
 )
 
 # Save topology to a file that all experiments will use
