@@ -65,3 +65,5 @@ Thumbs.db
 # Server files
 Run_cyclic.sh
 run_slurm.sh
+
+plots/
