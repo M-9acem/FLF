@@ -45,6 +45,8 @@ logs_test/
 shared_topology.pkl
 shared_topology.gpickle
 *.log
+*.ipynb
+*.tex
 
 # IDE
 .vscode/
@@ -62,3 +64,4 @@ Thumbs.db
 
 # Server files
 Run_cyclic.sh
+run_slurm.sh
