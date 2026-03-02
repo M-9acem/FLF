@@ -149,7 +149,8 @@ class P2PRunner:
                 'grad_norm': grad_norm,
                 'gradient_change': gradient_change,
                 'test_metrics': test_metrics,
-                'last_grad_vec': metrics.get('last_grad_vec')  # raw gradient vector
+                'last_grad_vec': metrics.get('last_grad_vec'),  # raw gradient vector
+                'num_samples': metrics.get('num_samples')
             }
         
         if num_workers > 1:
@@ -267,7 +268,8 @@ class P2PRunner:
                         cluster_id=cluster_id,
                         train_accuracy=result['final_accuracy'],
                         train_loss=result['final_loss'],
-                        weight_diff=weight_diffs.get(client.client_id, 0.0)
+                        weight_diff=weight_diffs.get(client.client_id, 0.0),
+                        num_samples=result.get('num_samples')
                     )
         
         # Phase 3: Evaluation

@@ -679,7 +679,8 @@ class ComprehensiveLogger:
         cluster_id: int = None,
         train_accuracy: float = None,
         train_loss: float = None,
-        weight_diff: float = 0.0
+        weight_diff: float = 0.0,
+        num_samples: int = None
     ):
         """Simplified logging method for P2P decentralized experiments.
         
@@ -714,7 +715,7 @@ class ComprehensiveLogger:
                     'train_accuracy', 'train_loss',
                     'test_accuracy', 'test_loss',
                     'gradient_norm', 'gradient_change',
-                    'weight_diff'
+                    'weight_diff', 'num_samples'
                 ])
         
         # Log overall metrics
@@ -725,7 +726,7 @@ class ComprehensiveLogger:
                 train_accuracy, train_loss,
                 test_accuracy, test_loss,
                 gradient_norm, gradient_change,
-                weight_diff
+                weight_diff, num_samples
             ])
         
         # Create per-class CSV file if not exists
