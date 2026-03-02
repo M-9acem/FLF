@@ -597,9 +597,8 @@ class ComprehensiveLogger:
     def save_client_final_weights(self, clients):
         """Save all client model weights at the end of training.
         
-        Creates two files:
-        1. client_final_weights.pt  - torch file with {client_id: state_dict} for exact comparison
-        2. client_weight_summary.csv - per-client per-layer statistics (norm, mean, std, min, max)
+        Creates:
+        - client_final_weights.pt  - torch file with {client_id: state_dict}
         
         Args:
             clients: List of client objects with .client_id and .get_state() methods
@@ -614,54 +613,8 @@ class ComprehensiveLogger:
         pt_file = self.exp_dir / "client_final_weights.pt"
         torch.save(all_state_dicts, str(pt_file))
         
-        # Save CSV summary with per-layer statistics
-        csv_file = self.exp_dir / "client_weight_summary.csv"
-        with open(csv_file, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow([
-                'client_id', 'layer_name', 'shape', 'num_params',
-                'l2_norm', 'mean', 'std', 'min', 'max'
-            ])
-            for client_id in sorted(all_state_dicts.keys()):
-                state = all_state_dicts[client_id]
-                for layer_name, tensor in state.items():
-                    flat = tensor.float().flatten()
-                    writer.writerow([
-                        client_id,
-                        layer_name,
-                        str(list(tensor.shape)),
-                        flat.numel(),
-                        f"{flat.norm(2).item():.6f}",
-                        f"{flat.mean().item():.6f}",
-                        f"{flat.std().item():.6f}",
-                        f"{flat.min().item():.6f}",
-                        f"{flat.max().item():.6f}"
-                    ])
-        
-        # Save pairwise L2 distances between client models
-        client_ids = sorted(all_state_dicts.keys())
-        dist_file = self.exp_dir / "client_pairwise_distances.csv"
-        with open(dist_file, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(['client_a', 'client_b', 'l2_distance', 'cosine_similarity'])
-            for i, id_a in enumerate(client_ids):
-                vec_a = torch.cat([v.float().flatten() for v in all_state_dicts[id_a].values()])
-                for id_b in client_ids[i+1:]:
-                    vec_b = torch.cat([v.float().flatten() for v in all_state_dicts[id_b].values()])
-                    l2_dist = (vec_a - vec_b).norm(2).item()
-                    cos_sim = torch.nn.functional.cosine_similarity(
-                        vec_a.unsqueeze(0), vec_b.unsqueeze(0)
-                    ).item()
-                    writer.writerow([
-                        id_a, id_b,
-                        f"{l2_dist:.6f}",
-                        f"{cos_sim:.6f}"
-                    ])
-        
         print(f"Client final weights saved to: {self.exp_dir}")
         print(f"  - client_final_weights.pt (full state dicts)")
-        print(f"  - client_weight_summary.csv (per-layer statistics)")
-        print(f"  - client_pairwise_distances.csv (model distances)")
 
     # ===================================================================
     # SIMPLIFIED P2P LOGGING METHOD

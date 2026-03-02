@@ -317,8 +317,6 @@ def run_decentralized(args):
     print(f"  - p2p_metrics.csv (overall metrics per client per round)")
     print(f"  - p2p_per_class_metrics.csv (per-class metrics)")
     print(f"  - client_final_weights.pt (full model state dicts)")
-    print(f"  - client_weight_summary.csv (per-layer weight statistics)")
-    print(f"  - client_pairwise_distances.csv (model distances)")
     print(f"  - network_topology.html (interactive network visualization)")
     print(f"  - topology_info.txt (network statistics)")
 
