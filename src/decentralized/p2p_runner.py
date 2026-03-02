@@ -1,6 +1,8 @@
 """P2P runner for decentralized federated learning."""
 
 import torch
+import torch.nn as nn
+import copy
 import time
 import os
 from collections import defaultdict
@@ -200,6 +202,90 @@ class P2PRunner:
                     npy_path = os.path.join(all_grad_dir, f'client_{client.client_id}_round_{round_num}.npy')
                     np.save(npy_path, grad_vec)
         
+        # Save pre-gossip weights and test metrics (before Phase 2)
+        if self.logger:
+            pre_gossip_states = {c.client_id: results[c.client_id]['state'] for c in self.clients}
+            self.logger.save_pre_gossip_weights(pre_gossip_states, round_num)
+            for client in self.clients:
+                result = results[client.client_id]
+                if result['test_metrics']:
+                    cluster_id = self.cluster_assignments.get(client.client_id)
+                    self.logger.log_pre_gossip_metrics(
+                        client_id=client.client_id,
+                        round_num=round_num,
+                        test_accuracy=result['test_metrics']['accuracy'],
+                        test_loss=result['test_metrics']['loss'],
+                        class_metrics=result['test_metrics'].get('class_metrics', {}),
+                        cluster_id=cluster_id,
+                        train_accuracy=result['final_accuracy'],
+                        train_loss=result['final_loss'],
+                        num_samples=result.get('num_samples')
+                    )
+
+        # Compute and evaluate the weighted-average (virtual FedAvg) model pre-gossip
+        if self.logger:
+            num_samples_map = {c.client_id: results[c.client_id].get('num_samples') or 1
+                               for c in self.clients}
+            total_samples = sum(num_samples_map.values())
+
+            # Build weighted-average state dict
+            avg_state = {}
+            for key in pre_gossip_states[self.clients[0].client_id].keys():
+                avg_state[key] = sum(
+                    pre_gossip_states[cid][key].float() * (num_samples_map[cid] / total_samples)
+                    for cid in num_samples_map
+                )
+
+            # Load into a temporary model copy and evaluate on the global test set
+            tmp_model = copy.deepcopy(self.clients[0].model)
+            tmp_model.load_state_dict(avg_state)
+            tmp_model.eval()
+            criterion = nn.CrossEntropyLoss()
+            total_loss, correct, total = 0.0, 0, 0
+            num_classes = 10
+            class_correct = [0] * num_classes
+            class_total = [0] * num_classes
+            all_targets, all_preds = [], []
+            with torch.no_grad():
+                for data, target in self.clients[0].test_loader:
+                    data, target = data.to(self.clients[0].device), target.to(self.clients[0].device)
+                    output = tmp_model(data)
+                    total_loss += criterion(output, target).item()
+                    pred = output.argmax(dim=1)
+                    correct += pred.eq(target).sum().item()
+                    total += target.size(0)
+                    all_targets.extend(target.cpu().numpy())
+                    all_preds.extend(pred.cpu().numpy())
+                    for i in range(len(target)):
+                        lbl = target[i].item()
+                        class_correct[lbl] += (pred[i] == target[i]).item()
+                        class_total[lbl] += 1
+            avg_acc = 100.0 * correct / total
+            avg_loss = total_loss / len(self.clients[0].test_loader)
+            class_metrics = {}
+            for cls in range(num_classes):
+                if class_total[cls] > 0:
+                    from sklearn.metrics import precision_score, recall_score, f1_score
+                    import numpy as _np
+                    t = _np.array(all_targets)
+                    p = _np.array(all_preds)
+                    class_metrics[cls] = {
+                        'accuracy': 100.0 * class_correct[cls] / class_total[cls],
+                        'precision': precision_score(t == cls, p == cls, zero_division=0),
+                        'recall': recall_score(t == cls, p == cls, zero_division=0),
+                        'f1_score': f1_score(t == cls, p == cls, zero_division=0),
+                    }
+                else:
+                    class_metrics[cls] = {'accuracy': 0.0, 'precision': 0.0, 'recall': 0.0, 'f1_score': 0.0}
+            del tmp_model
+            self.logger.log_global_aggregated_metrics(
+                round_num=round_num,
+                test_accuracy=avg_acc,
+                test_loss=avg_loss,
+                class_metrics=class_metrics,
+                total_samples=total_samples
+            )
+
         # Phase 2: Gossip aggregation (repeated gossip_steps times)
         print(f"Phase 2: Gossip aggregation ({self.gossip_steps} step(s))...")
         
@@ -251,33 +337,31 @@ class P2PRunner:
         communication_time = time.time() - communication_start
         print(f"Communication took {communication_time:.2f}s")
         
-        # Log metrics (after gossip, so weight_diff is available)
-        if self.logger:
-            for client in self.clients:
-                result = results[client.client_id]
-                if result['test_metrics']:
-                    cluster_id = self.cluster_assignments.get(client.client_id)
-                    self.logger.log_p2p_round_metrics(
-                        client_id=client.client_id,
-                        round_num=round_num,
-                        test_accuracy=result['test_metrics']['accuracy'],
-                        test_loss=result['test_metrics']['loss'],
-                        class_metrics=result['test_metrics'].get('class_metrics', {}),
-                        cluster_id=cluster_id,
-                        train_accuracy=result['final_accuracy'],
-                        train_loss=result['final_loss'],
-                        num_samples=result.get('num_samples')
-                    )
-        
-        # Phase 3: Evaluation
+        # Phase 3: Evaluation (post-gossip) + metric logging
         print("Phase 3: Evaluation...")
         eval_losses = []
         eval_accuracies = []
         
         for client in self.clients:
-            eval_metrics = client.evaluate()
-            eval_losses.append(eval_metrics['loss'])
-            eval_accuracies.append(eval_metrics['accuracy'])
+            compute_per_class = self.logger is not None
+            post_gossip_metrics = client.evaluate(compute_per_class_metrics=compute_per_class)
+            eval_losses.append(post_gossip_metrics['loss'])
+            eval_accuracies.append(post_gossip_metrics['accuracy'])
+            
+            if self.logger:
+                result = results[client.client_id]
+                cluster_id = self.cluster_assignments.get(client.client_id)
+                self.logger.log_p2p_round_metrics(
+                    client_id=client.client_id,
+                    round_num=round_num,
+                    test_accuracy=post_gossip_metrics['accuracy'],
+                    test_loss=post_gossip_metrics['loss'],
+                    class_metrics=post_gossip_metrics.get('class_metrics', {}),
+                    cluster_id=cluster_id,
+                    train_accuracy=result['final_accuracy'],
+                    train_loss=result['final_loss'],
+                    num_samples=result.get('num_samples')
+                )
         
         avg_loss = np.mean(eval_losses)
         avg_accuracy = np.mean(eval_accuracies)

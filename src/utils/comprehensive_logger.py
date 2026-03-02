@@ -591,6 +591,137 @@ class ComprehensiveLogger:
         return str(self.plots_dir)
 
     # ===================================================================
+    # GLOBAL AGGREGATED MODEL LOGGING
+    # ===================================================================
+
+    def log_global_aggregated_metrics(
+        self,
+        round_num: int,
+        test_accuracy: float,
+        test_loss: float,
+        class_metrics: Dict[int, Dict[str, float]],
+        total_samples: int = None
+    ):
+        """Log test metrics for the weighted-average (virtual FedAvg) model computed
+        pre-gossip from all client models weighted by their training sample counts.
+
+        Args:
+            round_num: Round number
+            test_accuracy: Overall test accuracy of the aggregated model
+            test_loss: Test loss of the aggregated model
+            class_metrics: Per-class metrics dictionary
+            total_samples: Total number of training samples across all clients
+        """
+        csv_file = self.exp_dir / "global_aggregated_metrics.csv"
+        if not csv_file.exists():
+            with open(csv_file, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(['round', 'test_accuracy', 'test_loss', 'total_samples'])
+        with open(csv_file, 'a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([round_num, test_accuracy, test_loss, total_samples])
+
+        class_csv_file = self.exp_dir / "global_aggregated_per_class_metrics.csv"
+        if not class_csv_file.exists():
+            with open(class_csv_file, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(['round', 'class_id',
+                                 'class_accuracy', 'class_precision', 'class_recall', 'class_f1_score'])
+        with open(class_csv_file, 'a', newline='') as f:
+            writer = csv.writer(f)
+            for class_id, metrics in class_metrics.items():
+                writer.writerow([
+                    round_num, class_id,
+                    metrics.get('accuracy', 0.0),
+                    metrics.get('precision', 0.0),
+                    metrics.get('recall', 0.0),
+                    metrics.get('f1_score', 0.0)
+                ])
+
+    # ===================================================================
+    # PRE-GOSSIP WEIGHTS & METRICS LOGGING
+    # ===================================================================
+
+    def save_pre_gossip_weights(self, client_states: dict, round_num: int):
+        """Save client model weights before gossip aggregation for a given round.
+
+        Args:
+            client_states: Dict mapping client_id to CPU state_dict
+            round_num: Current round number
+        """
+        pre_gossip_dir = self.exp_dir / "pre_gossip_weights"
+        pre_gossip_dir.mkdir(exist_ok=True)
+        pt_file = pre_gossip_dir / f"round_{round_num}.pt"
+        torch.save(client_states, str(pt_file))
+
+    def log_pre_gossip_metrics(
+        self,
+        client_id: int,
+        round_num: int,
+        test_accuracy: float,
+        test_loss: float,
+        class_metrics: Dict[int, Dict[str, float]],
+        cluster_id: int = None,
+        train_accuracy: float = None,
+        train_loss: float = None,
+        num_samples: int = None
+    ):
+        """Log per-client metrics captured before gossip aggregation.
+
+        Writes to pre_gossip_metrics.csv (same schema as p2p_metrics.csv).
+
+        Args:
+            client_id: Client identifier
+            round_num: Round number
+            test_accuracy: Test accuracy of the locally-trained model (pre-gossip)
+            test_loss: Test loss of the locally-trained model (pre-gossip)
+            class_metrics: Per-class metrics dictionary
+            cluster_id: Cluster identifier
+            train_accuracy: Training accuracy (last epoch)
+            train_loss: Training loss (last epoch)
+            num_samples: Number of training samples
+        """
+        # Main metrics CSV
+        csv_file = self.exp_dir / "pre_gossip_metrics.csv"
+        if not csv_file.exists():
+            with open(csv_file, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    'client_id', 'round', 'cluster_id',
+                    'train_accuracy', 'train_loss',
+                    'test_accuracy', 'test_loss',
+                    'num_samples'
+                ])
+        with open(csv_file, 'a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                client_id, round_num, cluster_id,
+                train_accuracy, train_loss,
+                test_accuracy, test_loss,
+                num_samples
+            ])
+
+        # Per-class metrics CSV
+        class_csv_file = self.exp_dir / "pre_gossip_per_class_metrics.csv"
+        if not class_csv_file.exists():
+            with open(class_csv_file, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    'client_id', 'round', 'cluster_id', 'class_id',
+                    'class_accuracy', 'class_precision', 'class_recall', 'class_f1_score'
+                ])
+        with open(class_csv_file, 'a', newline='') as f:
+            writer = csv.writer(f)
+            for class_id, metrics in class_metrics.items():
+                writer.writerow([
+                    client_id, round_num, cluster_id, class_id,
+                    metrics.get('accuracy', 0.0),
+                    metrics.get('precision', 0.0),
+                    metrics.get('recall', 0.0),
+                    metrics.get('f1_score', 0.0)
+                ])
+
+    # ===================================================================
     # CLIENT FINAL WEIGHTS LOGGING
     # ===================================================================
 
