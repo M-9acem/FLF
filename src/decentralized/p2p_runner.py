@@ -262,13 +262,10 @@ class P2PRunner:
                         round_num=round_num,
                         test_accuracy=result['test_metrics']['accuracy'],
                         test_loss=result['test_metrics']['loss'],
-                        gradient_norm=result['grad_norm'],
-                        gradient_change=result['gradient_change'],
                         class_metrics=result['test_metrics'].get('class_metrics', {}),
                         cluster_id=cluster_id,
                         train_accuracy=result['final_accuracy'],
                         train_loss=result['final_loss'],
-                        weight_diff=weight_diffs.get(client.client_id, 0.0),
                         num_samples=result.get('num_samples')
                     )
         

@@ -626,13 +626,10 @@ class ComprehensiveLogger:
         round_num: int,
         test_accuracy: float,
         test_loss: float,
-        gradient_norm: float,
-        gradient_change: float,
         class_metrics: Dict[int, Dict[str, float]],
         cluster_id: int = None,
         train_accuracy: float = None,
         train_loss: float = None,
-        weight_diff: float = 0.0,
         num_samples: int = None
     ):
         """Simplified logging method for P2P decentralized experiments.
@@ -641,22 +638,16 @@ class ComprehensiveLogger:
         1. Training accuracy and loss per client per round
         2. Test accuracy and loss per client per round
         3. Accuracy per class of each client for each round
-        4. Gradient norm of each client per round
-        5. Gradient changes per round of each client
-        6. Weight difference (L2) before/after gossip aggregation
         
         Args:
             client_id: Client identifier
             round_num: Round number
             test_accuracy: Overall test accuracy for this client
             test_loss: Test loss for this client
-            gradient_norm: L2 norm of gradients (concatenated gradient vector)
-            gradient_change: Change in gradient norm from previous round
             class_metrics: Per-class metrics dictionary
             cluster_id: Cluster identifier (0 or 1 for two-cluster topology, None otherwise)
             train_accuracy: Training accuracy for this client (last epoch)
             train_loss: Training loss for this client (last epoch)
-            weight_diff: L2 norm of weight difference before/after gossip aggregation
         """
         # Create simplified CSV file if not exists
         p2p_file = self.exp_dir / "p2p_metrics.csv"
@@ -667,8 +658,7 @@ class ComprehensiveLogger:
                     'client_id', 'round', 'cluster_id',
                     'train_accuracy', 'train_loss',
                     'test_accuracy', 'test_loss',
-                    'gradient_norm', 'gradient_change',
-                    'weight_diff', 'num_samples'
+                    'num_samples'
                 ])
         
         # Log overall metrics
@@ -678,8 +668,7 @@ class ComprehensiveLogger:
                 client_id, round_num, cluster_id,
                 train_accuracy, train_loss,
                 test_accuracy, test_loss,
-                gradient_norm, gradient_change,
-                weight_diff, num_samples
+                num_samples
             ])
         
         # Create per-class CSV file if not exists
