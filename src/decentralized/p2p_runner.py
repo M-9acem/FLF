@@ -2,6 +2,7 @@
 
 import torch
 import time
+import os
 from collections import defaultdict
 from typing import List, Dict
 import numpy as np
@@ -121,7 +122,13 @@ class P2PRunner:
         
         def _train_p2p_client(client):
             """Train a single P2P client and return results."""
-            metrics = client.train(epochs=local_epochs)
+            batch_grad_log_dir = None
+            if self.logger:
+                batch_grad_log_dir = os.path.join(
+                    self.logger.get_log_dir(),
+                    f'gradients_per_batch_client_{client.client_id}'
+                )
+            metrics = client.train(epochs=local_epochs, batch_grad_log_dir=batch_grad_log_dir, round_num=round_num)
             state = client.get_state()
             
             grad_norm = metrics['gradient_norms'][-1] if metrics['gradient_norms'] else 0.0
@@ -141,7 +148,8 @@ class P2PRunner:
                 'final_accuracy': metrics['final_accuracy'],
                 'grad_norm': grad_norm,
                 'gradient_change': gradient_change,
-                'test_metrics': test_metrics
+                'test_metrics': test_metrics,
+                'last_grad_vec': metrics.get('last_grad_vec')  # raw gradient vector
             }
         
         if num_workers > 1:
@@ -180,6 +188,16 @@ class P2PRunner:
             gradient_norms_list.append(result['grad_norm'])
             
             print(f"Client {client.client_id}: Loss={result['final_loss']:.4f}, Acc={result['final_accuracy']:.2f}%")
+        
+        # Save mean gradient tensors (original shapes) to .npz, one file per client per round
+        if self.logger:
+            all_grad_dir = os.path.join(self.logger.get_log_dir(), 'all_gradients')
+            os.makedirs(all_grad_dir, exist_ok=True)
+            for client in self.clients:
+                grad_vec = results[client.client_id].get('last_grad_vec')
+                if grad_vec is not None:
+                    npy_path = os.path.join(all_grad_dir, f'client_{client.client_id}_round_{round_num}.npy')
+                    np.save(npy_path, grad_vec)
         
         # Phase 2: Gossip aggregation (repeated gossip_steps times)
         print(f"Phase 2: Gossip aggregation ({self.gossip_steps} step(s))...")

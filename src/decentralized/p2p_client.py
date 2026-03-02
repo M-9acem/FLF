@@ -1,5 +1,6 @@
 """P2P client implementation for decentralized federated learning."""
 
+import os
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -70,11 +71,13 @@ class P2PClient:
         """
         self.neighbor_models = copy.deepcopy(neighbor_states)
     
-    def train(self, epochs: int = 1) -> Dict[str, any]:
+    def train(self, epochs: int = 1, batch_grad_log_dir: str = None, round_num: int = None) -> Dict[str, any]:
         """Train the local model.
         
         Args:
             epochs: Number of local training epochs
+            batch_grad_log_dir: If set, save per-batch gradient .npz files (original shapes) into this directory
+            round_num: Current round number (required when batch_grad_log_dir is set)
             
         Returns:
             Dictionary with training metrics
@@ -91,6 +94,7 @@ class P2PClient:
         epoch_losses = []
         epoch_accuracies = []
         epoch_gradient_norms = []
+        last_grad_vec = None  # will hold the mean gradient vector over all batches of the last epoch
         
         # Per-class metrics
         num_classes = 10
@@ -102,6 +106,8 @@ class P2PClient:
             correct = 0
             total = 0
             gradient_norms = []
+            grad_vec_accumulator = None
+            epoch_batch_count = 0
             
             for batch_idx, (data, target) in enumerate(self.train_loader):
                 data, target = data.to(self.device), target.to(self.device)
@@ -115,6 +121,15 @@ class P2PClient:
                 grad_vec = torch.cat([p.grad.data.flatten() for p in self.model.parameters() if p.grad is not None])
                 total_norm = grad_vec.norm(2).item()
                 gradient_norms.append(total_norm)
+                # Accumulate flat gradient vector for mean over epoch
+                grad_vec_accumulator = grad_vec.detach().clone() if grad_vec_accumulator is None else grad_vec_accumulator + grad_vec.detach()
+                epoch_batch_count += 1
+                
+                # Save per-batch gradient as a single flat .npy file
+                if batch_grad_log_dir is not None:
+                    os.makedirs(batch_grad_log_dir, exist_ok=True)
+                    npy_path = os.path.join(batch_grad_log_dir, f'round_{round_num}_epoch_{epoch}_batch_{batch_idx}.npy')
+                    np.save(npy_path, grad_vec.cpu().numpy())
                 
                 optimizer.step()
                 
@@ -137,6 +152,9 @@ class P2PClient:
             epoch_losses.append(avg_loss)
             epoch_accuracies.append(accuracy)
             epoch_gradient_norms.append(avg_gradient_norm)
+            # Compute mean gradient vector for this epoch; last epoch's value is kept after the loop
+            if grad_vec_accumulator is not None:
+                last_grad_vec = (grad_vec_accumulator / epoch_batch_count).cpu().numpy()
         
         # Calculate per-class accuracies
         class_accuracies = {}
@@ -157,7 +175,8 @@ class P2PClient:
             'gradient_variance': gradient_variance,
             'class_accuracies': class_accuracies,
             'final_loss': epoch_losses[-1],
-            'final_accuracy': epoch_accuracies[-1]
+            'final_accuracy': epoch_accuracies[-1],
+            'last_grad_vec': last_grad_vec  # raw gradient vector: last batch of last epoch
         }
     
     def gossip_aggregate(self, weights: Dict[int, float]) -> float:
