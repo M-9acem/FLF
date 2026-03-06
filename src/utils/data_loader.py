@@ -103,7 +103,6 @@ def _dirichlet_partition(
     labels: np.ndarray,
     num_clients: int,
     alpha: float,
-    min_partition_size: int = 10
 ) -> List[np.ndarray]:
     """Non-IID partitioning using Dirichlet distribution."""
     num_classes = labels.max() + 1
@@ -114,22 +113,10 @@ def _dirichlet_partition(
         np.random.shuffle(class_indices[y])
         class_size = len(class_indices[y])
 
-        # Sample proportions until valid
-        trial = 0
-        while True:
-            proportions = np.random.dirichlet(alpha=[alpha] * num_clients)
-            splits = (np.cumsum(proportions) * class_size).astype(int)[:-1]
-            shards = np.split(class_indices[y], splits)
-
-            # Check if all shards are large enough
-            if all(len(shard) >= min_partition_size or len(shard) == 0 for shard in shards):
-                break
-        
-            trial += 1
-            if trial == 10:
-                raise ValueError(
-                    "Max attempts (10) reached. Please adjust alpha."
-                )
+        # Sample proportions and split
+        proportions = np.random.dirichlet(alpha=[alpha] * num_clients)
+        splits = (np.cumsum(proportions) * class_size).astype(int)[:-1]
+        shards = np.split(class_indices[y], splits)
         
         # Assign shards to clients
         for client_id, shard in enumerate(shards):
