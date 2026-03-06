@@ -13,9 +13,9 @@ from src.decentralized.topology import create_two_cluster_topology
 
 # Configuration - QUICK TEST
 NUM_CLIENTS = 40
-ROUNDS = 400
-EPOCHS = 1
-GOSSIP_STEPS = 5  # Number of gossip iterations per round
+ROUNDS = 200
+EPOCHS = 2
+GOSSIP_STEPS = 1  # Number of gossip iterations per round
 DATASET = "cifar10"
 MAIN_LINK_PROB = 1.0
 BORDER_LINK_PROB = 1.0
@@ -63,10 +63,15 @@ print('='*70)
 # Canonical partition — generated once by generate_partition.py
 partition_file = Path('data_partition') / f'{DATASET}_N{NUM_CLIENTS}_dirichlet_a0.5.pkl'
 if not partition_file.exists():
-    raise FileNotFoundError(
-        f'Canonical partition not found: {partition_file}\n'
-        f'Run  python generate_partition.py  once to create it.'
-    )
+    print(f'\nPartition file not found: {partition_file}')
+    print('Running generate_partition.py to create it ...')
+    import subprocess as _sp
+    _sp.run([sys.executable, 'generate_partition.py'], check=True)
+    if not partition_file.exists():
+        raise FileNotFoundError(
+            f'generate_partition.py ran but {partition_file} was not created.\n'
+            f'Check that CONFIGS in generate_partition.py includes N={NUM_CLIENTS}.'
+        )
 print(f'\nUsing canonical data partition: {partition_file}')
 print('All mixing methods will train on identical client data splits!')
 print('='*70)
