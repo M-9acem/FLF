@@ -639,6 +639,29 @@ class ComprehensiveLogger:
                 ])
 
     # ===================================================================
+    # PARTITION STATS LOGGING
+    # ===================================================================
+
+    def log_partition_stats(self, client_indices: list, dataset_targets):
+        """Log per-client class distribution to partition_stats.csv.
+
+        Args:
+            client_indices: List of index arrays, one per client (from partition_data)
+            dataset_targets: Array-like of integer labels for the full training set
+        """
+        import numpy as np
+        targets = np.array(dataset_targets)
+        classes = sorted(np.unique(targets).tolist())
+        csv_path = self.exp_dir / 'partition_stats.csv'
+        with open(csv_path, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['client_id', 'class_id', 'num_samples'])
+            for cid, indices in enumerate(client_indices):
+                counts = np.bincount(targets[indices], minlength=len(classes))
+                for cls, cnt in enumerate(counts):
+                    writer.writerow([cid, cls, int(cnt)])
+
+    # ===================================================================
     # PRE-GOSSIP WEIGHTS & METRICS LOGGING
     # ===================================================================
 
