@@ -71,13 +71,12 @@ class P2PClient:
         """
         self.neighbor_models = copy.deepcopy(neighbor_states)
     
-    def train(self, epochs: int = 1, batch_grad_log_dir: str = None, round_num: int = None) -> Dict[str, any]:
+    def train(self, epochs: int = 1, round_num: int = None) -> Dict[str, any]:
         """Train the local model.
         
         Args:
             epochs: Number of local training epochs
-            batch_grad_log_dir: If set, save per-batch gradient .npz files (original shapes) into this directory
-            round_num: Current round number (required when batch_grad_log_dir is set)
+            round_num: Current round number
             
         Returns:
             Dictionary with training metrics
@@ -124,12 +123,6 @@ class P2PClient:
                 # Accumulate flat gradient vector for mean over epoch
                 grad_vec_accumulator = grad_vec.detach().clone() if grad_vec_accumulator is None else grad_vec_accumulator + grad_vec.detach()
                 epoch_batch_count += 1
-                
-                # Save per-batch gradient as a single flat .npy file
-                if batch_grad_log_dir is not None:
-                    os.makedirs(batch_grad_log_dir, exist_ok=True)
-                    npy_path = os.path.join(batch_grad_log_dir, f'round_{round_num}_epoch_{epoch}_batch_{batch_idx}.npy')
-                    np.save(npy_path, grad_vec.cpu().numpy())
                 
                 optimizer.step()
                 

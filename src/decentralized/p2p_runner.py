@@ -124,13 +124,7 @@ class P2PRunner:
         
         def _train_p2p_client(client):
             """Train a single P2P client and return results."""
-            batch_grad_log_dir = None
-            if self.logger:
-                batch_grad_log_dir = os.path.join(
-                    self.logger.get_log_dir(),
-                    f'gradients_per_batch_client_{client.client_id}'
-                )
-            metrics = client.train(epochs=local_epochs, batch_grad_log_dir=batch_grad_log_dir, round_num=round_num)
+            metrics = client.train(epochs=local_epochs, round_num=round_num)
             state = client.get_state()
             
             grad_norm = metrics['gradient_norms'][-1] if metrics['gradient_norms'] else 0.0
