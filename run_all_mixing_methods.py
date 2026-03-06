@@ -49,6 +49,17 @@ print(f"Graph: {graph.number_of_nodes()} nodes, {graph.number_of_edges()} edges"
 print("All mixing methods will use this same topology!")
 print("="*70)
 
+# Canonical initial weights — generated once by generate_init_weights.py
+shared_w0_path = Path('init_weights') / 'resnet8_w0.pt'
+if not shared_w0_path.exists():
+    raise FileNotFoundError(
+        f'Canonical initial weights not found: {shared_w0_path}\n'
+        f'Run  python generate_init_weights.py  once to create them.'
+    )
+print(f'\nUsing canonical initial weights: {shared_w0_path}')
+print('All mixing methods will start from these same weights!')
+print('='*70)
+
 methods = [
     ("metropolis_hastings", "Metropolis-Hastings (Default)"),
     ("max_degree", "Max-Degree (Uniform Weights)"),
@@ -77,7 +88,8 @@ for i, (method, description) in enumerate(methods, 1):
         "--model", "resnet8",
         "--experiment_name", experiment_name,
         "--topology_file", str(shared_topology_path),
-        "--gossip_steps", str(GOSSIP_STEPS)
+        "--gossip_steps", str(GOSSIP_STEPS),
+        "--init_weights", str(shared_w0_path)
     ]
     
     method_start = datetime.now()
