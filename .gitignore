@@ -47,6 +47,7 @@ shared_topology.gpickle
 *.log
 *.ipynb
 *.tex
+init_weights/
 
 # IDE
 .vscode/
@@ -67,3 +68,4 @@ Run_cyclic.sh
 run_slurm.sh
 
 plots/
+
