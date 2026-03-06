@@ -1,6 +1,7 @@
 """Main entry point for the Federated Learning Framework."""
 
 import argparse
+import sys
 import time
 import torch
 import numpy as np
@@ -238,7 +239,11 @@ def run_decentralized(args):
         batch_size=args.batch_size,
         num_workers=args.num_workers
     )
-    
+
+    # Log partition stats (class distribution per client)
+    logger.log_partition_stats(client_indices, train_dataset.targets)
+    print('Partition stats saved to partition_stats.csv')
+
     # Create topology
     if args.topology_file:
         # Load pre-generated topology
@@ -259,6 +264,15 @@ def run_decentralized(args):
         )
         print(f"Graph: {graph.number_of_nodes()} nodes, {graph.number_of_edges()} edges")
     
+    # Load shared initial weights w_0 so every client starts identically
+    w0_path = Path(args.init_weights) if args.init_weights else Path('init_weights') / f'{args.model}_w0.pt'
+    if not w0_path.exists():
+        print(f'Initial weights not found at {w0_path} — running generate_init_weights.py ...')
+        import subprocess as _sp
+        _sp.run([sys.executable, 'generate_init_weights.py'], check=True)
+    shared_w0 = torch.load(w0_path, map_location='cpu', weights_only=True)
+    print(f'Loaded shared initial weights from: {w0_path}')
+
     # Create clients (distributed across GPUs round-robin)
     print(f"Initializing {args.num_clients} P2P clients across {len(devices)} device(s)...")
     clients = []
@@ -266,6 +280,7 @@ def run_decentralized(args):
         client_device = devices[i % len(devices)]
         train_loader, test_loader = client_loaders[i]
         model = create_model(args.model, num_classes, num_channels)
+        model.load_state_dict(shared_w0)
         client = P2PClient(
             client_id=i,
             model=model,
@@ -370,7 +385,7 @@ def main():
     parser.add_argument(
         '--partition',
         type=str,
-        default='iid',
+        default='dirichlet',
         choices=['iid', 'dirichlet', 'pathological'],
         help='Data partitioning strategy'
     )
@@ -406,6 +421,9 @@ def main():
     parser.add_argument('--no_cuda', action='store_true', help='Disable CUDA')
     parser.add_argument('--num_workers', type=int, default=0, help='Number of data loading workers')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
+    parser.add_argument('--init_weights', type=str, default=None,
+        help='Path to a w_0.pt file. Defaults to init_weights/<model>_w0.pt. '
+             'Run generate_init_weights.py once to create these files.')
     
     # Logging parameters
     parser.add_argument('--log_dir', type=str, default='./logs', help='Log directory')
