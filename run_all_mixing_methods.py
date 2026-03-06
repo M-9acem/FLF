@@ -60,6 +60,17 @@ print(f'\nUsing canonical initial weights: {shared_w0_path}')
 print('All mixing methods will start from these same weights!')
 print('='*70)
 
+# Canonical partition — generated once by generate_partition.py
+partition_file = Path('data_partition') / f'{DATASET}_N{NUM_CLIENTS}_dirichlet_a0.5.pkl'
+if not partition_file.exists():
+    raise FileNotFoundError(
+        f'Canonical partition not found: {partition_file}\n'
+        f'Run  python generate_partition.py  once to create it.'
+    )
+print(f'\nUsing canonical data partition: {partition_file}')
+print('All mixing methods will train on identical client data splits!')
+print('='*70)
+
 methods = [
     ("metropolis_hastings", "Metropolis-Hastings (Default)"),
     ("max_degree", "Max-Degree (Uniform Weights)"),
@@ -89,7 +100,8 @@ for i, (method, description) in enumerate(methods, 1):
         "--experiment_name", experiment_name,
         "--topology_file", str(shared_topology_path),
         "--gossip_steps", str(GOSSIP_STEPS),
-        "--init_weights", str(shared_w0_path)
+        "--init_weights", str(shared_w0_path),
+        "--partition_file", str(partition_file)
     ]
     
     method_start = datetime.now()

@@ -1,6 +1,7 @@
 """Main entry point for the Federated Learning Framework."""
 
 import argparse
+import pickle
 import sys
 import time
 import torch
@@ -99,16 +100,33 @@ def run_centralized(args):
         num_classes = 10
         num_channels = 3
     
-    # Partition data
-    print(f"Partitioning data among {args.num_clients} clients ({args.partition})...")
-    client_indices = partition_data(
-        train_dataset,
-        args.num_clients,
-        partition_type=args.partition,
-        alpha=args.alpha,
-        num_classes_per_client=args.classes_per_client
+    # Partition data — load canonical file or generate+save
+    _part_fname = (
+        f'{args.dataset}_N{args.num_clients}_pathological_c{args.classes_per_client}.pkl'
+        if args.partition == 'pathological'
+        else f'{args.dataset}_N{args.num_clients}_{args.partition}_a{args.alpha}.pkl'
     )
-    
+    _part_path = Path(args.partition_file) if args.partition_file else Path('data_partition') / _part_fname
+    if _part_path.exists():
+        print(f'Loading canonical partition from: {_part_path}')
+        with open(_part_path, 'rb') as _f:
+            client_indices = pickle.load(_f)
+    else:
+        print(f'Partition file not found at {_part_path} — partitioning and saving ...')
+        client_indices = partition_data(
+            train_dataset,
+            args.num_clients,
+            partition_type=args.partition,
+            alpha=args.alpha,
+            num_classes_per_client=args.classes_per_client
+        )
+        _part_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(_part_path, 'wb') as _f:
+            pickle.dump(client_indices, _f)
+        print(f'Partition saved to: {_part_path} (will be reused in future runs)')
+    _sizes = [len(idx) for idx in client_indices]
+    print(f'{len(client_indices)} client splits — min {min(_sizes)}, max {max(_sizes)}, total {sum(_sizes)} samples')
+
     # Create dataloaders
     client_loaders = create_dataloaders(
         train_dataset,
@@ -221,16 +239,33 @@ def run_decentralized(args):
         num_classes = 10
         num_channels = 3
     
-    # Partition data
-    print(f"Partitioning data among {args.num_clients} clients ({args.partition})...")
-    client_indices = partition_data(
-        train_dataset,
-        args.num_clients,
-        partition_type=args.partition,
-        alpha=args.alpha,
-        num_classes_per_client=args.classes_per_client
+    # Partition data — load canonical file or generate+save
+    _part_fname = (
+        f'{args.dataset}_N{args.num_clients}_pathological_c{args.classes_per_client}.pkl'
+        if args.partition == 'pathological'
+        else f'{args.dataset}_N{args.num_clients}_{args.partition}_a{args.alpha}.pkl'
     )
-    
+    _part_path = Path(args.partition_file) if args.partition_file else Path('data_partition') / _part_fname
+    if _part_path.exists():
+        print(f'Loading canonical partition from: {_part_path}')
+        with open(_part_path, 'rb') as _f:
+            client_indices = pickle.load(_f)
+    else:
+        print(f'Partition file not found at {_part_path} — partitioning and saving ...')
+        client_indices = partition_data(
+            train_dataset,
+            args.num_clients,
+            partition_type=args.partition,
+            alpha=args.alpha,
+            num_classes_per_client=args.classes_per_client
+        )
+        _part_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(_part_path, 'wb') as _f:
+            pickle.dump(client_indices, _f)
+        print(f'Partition saved to: {_part_path} (will be reused in future runs)')
+    _sizes = [len(idx) for idx in client_indices]
+    print(f'{len(client_indices)} client splits — min {min(_sizes)}, max {max(_sizes)}, total {sum(_sizes)} samples')
+
     # Create dataloaders
     client_loaders = create_dataloaders(
         train_dataset,
@@ -248,7 +283,6 @@ def run_decentralized(args):
     if args.topology_file:
         # Load pre-generated topology
         print(f"Loading pre-generated topology from: {args.topology_file}")
-        import pickle
         with open(args.topology_file, 'rb') as f:
             graph = pickle.load(f)
         print(f"Loaded graph: {graph.number_of_nodes()} nodes, {graph.number_of_edges()} edges")
@@ -424,6 +458,10 @@ def main():
     parser.add_argument('--init_weights', type=str, default=None,
         help='Path to a w_0.pt file. Defaults to init_weights/<model>_w0.pt. '
              'Run generate_init_weights.py once to create these files.')
+    parser.add_argument('--partition_file', type=str, default=None,
+        help='Path to a pre-generated partition .pkl file. '
+             'Defaults to data_partition/<dataset>_N<num_clients>_<partition>_a<alpha>.pkl. '
+             'Run generate_partition.py once to create these files.')
     
     # Logging parameters
     parser.add_argument('--log_dir', type=str, default='./logs', help='Log directory')
