@@ -52,10 +52,9 @@ print("="*70)
 # Canonical initial weights — generated once by generate_init_weights.py
 shared_w0_path = Path('init_weights') / 'resnet8_w0.pt'
 if not shared_w0_path.exists():
-    raise FileNotFoundError(
-        f'Canonical initial weights not found: {shared_w0_path}\n'
-        f'Run  python generate_init_weights.py  once to create them.'
-    )
+    print(f'\nInitial weights not found: {shared_w0_path}')
+    print('Running generate_init_weights.py to create them ...')
+    subprocess.run([sys.executable, 'generate_init_weights.py'], check=True)
 print(f'\nUsing canonical initial weights: {shared_w0_path}')
 print('All mixing methods will start from these same weights!')
 print('='*70)
