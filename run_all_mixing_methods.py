@@ -28,23 +28,27 @@ print(f"Configuration: {NUM_CLIENTS} clients, {ROUNDS} rounds, {EPOCHS} epochs, 
 print(f"Dataset: {DATASET}")
 print("="*70)
 
-# Generate the topology ONCE
+# Canonical topology — load if exists, generate and save if not
 print("\n" + "="*70)
-print("GENERATING SHARED TOPOLOGY (used by all methods)")
+print("SHARED TOPOLOGY (used by all methods)")
 print("="*70)
-graph = create_two_cluster_topology(
-    num_clients=NUM_CLIENTS,
-    main_link_prob=MAIN_LINK_PROB,
-    border_link_prob=BORDER_LINK_PROB,
-    intra_cluster_prob=INTRA_CLUSTER_PROB,
-    intra_cluster_communication=False  # Set to False for star topology
-)
-
-# Save topology to a file that all experiments will use
 shared_topology_path = Path("shared_topology.pkl")
-with open(shared_topology_path, 'wb') as f:
-    pickle.dump(graph, f)
-print(f"\nTopology saved to: {shared_topology_path}")
+if shared_topology_path.exists():
+    print(f"Loading existing topology from: {shared_topology_path}")
+    with open(shared_topology_path, 'rb') as f:
+        graph = pickle.load(f)
+else:
+    print("Topology file not found — generating and saving ...")
+    graph = create_two_cluster_topology(
+        num_clients=NUM_CLIENTS,
+        main_link_prob=MAIN_LINK_PROB,
+        border_link_prob=BORDER_LINK_PROB,
+        intra_cluster_prob=INTRA_CLUSTER_PROB,
+        intra_cluster_communication=False
+    )
+    with open(shared_topology_path, 'wb') as f:
+        pickle.dump(graph, f)
+    print(f"Topology saved to: {shared_topology_path} (will be reused in future runs)")
 print(f"Graph: {graph.number_of_nodes()} nodes, {graph.number_of_edges()} edges")
 print("All mixing methods will use this same topology!")
 print("="*70)
@@ -124,12 +128,6 @@ for i, (method, description) in enumerate(methods, 1):
 
 end_time = datetime.now()
 total_duration = (end_time - start_time).total_seconds() / 60
-
-# Clean up temporary topology file
-print("\nCleaning up temporary files...")
-if shared_topology_path.exists():
-    shared_topology_path.unlink()
-    print(f"Deleted: {shared_topology_path}")
 
 # Print summary
 print("\n" + "="*70)
