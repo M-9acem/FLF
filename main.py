@@ -332,13 +332,22 @@ def run_decentralized(args):
             print(f"  {d}: {count} clients")
     
     # Create runner
+    # Parse gossip schedule if provided: "5:0,3:100,1:200" -> [(0,5),(100,3),(200,1)]
+    gossip_schedule = None
+    if args.gossip_schedule:
+        gossip_schedule = []
+        for entry in args.gossip_schedule.split(','):
+            steps_str, round_str = entry.strip().split(':')
+            gossip_schedule.append((int(round_str), int(steps_str)))
+
     runner = P2PRunner(
         clients=clients,
         graph=graph,
         logger=logger,
         seed=args.seed,
         mixing_method=args.mixing_method,
-        gossip_steps=args.gossip_steps
+        gossip_steps=args.gossip_steps,
+        gossip_schedule=gossip_schedule
     )
     
     # Save network topology visualization
@@ -445,6 +454,10 @@ def main():
         help='Mixing matrix method for gossip aggregation'
     )
     parser.add_argument('--gossip_steps', type=int, default=1, help='Number of gossip iterations per round before next training')
+    parser.add_argument('--gossip_schedule', type=str, default=None,
+        help='Gossip drop schedule as "steps:from_round" pairs, e.g. "5:0,3:100,1:200" '
+             'means 5 gossip steps until round 100, 3 until round 200, then 1. '
+             'Overrides --gossip_steps when provided.')
     parser.add_argument(
         '--intra_cluster_communication',
         action='store_true',

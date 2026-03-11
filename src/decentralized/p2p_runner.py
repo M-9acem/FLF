@@ -28,7 +28,8 @@ class P2PRunner:
         logger = None,
         seed: int = 42,
         mixing_method: MixingMethod = 'metropolis_hastings',
-        gossip_steps: int = 1
+        gossip_steps: int = 1,
+        gossip_schedule: List[tuple] = None
     ):
         """Initialize P2P runner.
         
@@ -38,7 +39,11 @@ class P2PRunner:
             logger: Comprehensive metrics logger
             seed: Random seed for reproducibility
             mixing_method: Mixing method for gossip aggregation
-            gossip_steps: Number of gossip iterations per round (before next training)
+            gossip_steps: Default number of gossip steps per round (used when no schedule)
+            gossip_schedule: Optional list of (from_round, steps) tuples defining a
+                gossip drop schedule, e.g. [(0,5),(100,3),(200,1)] means 5 steps
+                until round 100, 3 until round 200, then 1 for remaining rounds.
+                Overrides gossip_steps when provided.
         """
         self.clients = clients
         self.graph = graph
@@ -46,12 +51,18 @@ class P2PRunner:
         self.seed = seed
         self.mixing_method = mixing_method
         self.gossip_steps = gossip_steps
+        # Sort schedule by from_round ascending
+        self.gossip_schedule = sorted(gossip_schedule, key=lambda x: x[0]) if gossip_schedule else None
         self.num_clients = len(clients)
         
         # Compute cluster assignments (for two-cluster topology)
         self.cluster_assignments = self._compute_clusters()
         
-        print(f"P2P Runner initialized with mixing method: {mixing_method}, gossip_steps: {gossip_steps}")
+        if self.gossip_schedule:
+            schedule_str = ', '.join(f'{s} steps from round {r}' for r, s in self.gossip_schedule)
+            print(f"P2P Runner initialized with mixing method: {mixing_method}, gossip schedule: [{schedule_str}]")
+        else:
+            print(f"P2P Runner initialized with mixing method: {mixing_method}, gossip_steps: {gossip_steps}")
     
     def save_topology_visualization(self, output_dir: str, experiment_name: str = "p2p_topology"):
         """Save network topology as interactive HTML.
@@ -280,15 +291,24 @@ class P2PRunner:
                 total_samples=total_samples
             )
 
-        # Phase 2: Gossip aggregation (repeated gossip_steps times)
-        print(f"Phase 2: Gossip aggregation ({self.gossip_steps} step(s))...")
+        # Resolve effective gossip steps for this round (schedule or fixed)
+        if self.gossip_schedule:
+            effective_gossip_steps = self.gossip_schedule[0][1]  # default: first entry
+            for from_round, steps in self.gossip_schedule:
+                if round_num >= from_round:
+                    effective_gossip_steps = steps
+        else:
+            effective_gossip_steps = self.gossip_steps
+
+        # Phase 2: Gossip aggregation (repeated effective_gossip_steps times)
+        print(f"Phase 2: Gossip aggregation ({effective_gossip_steps} step(s))...")
         
         communication_start = time.time()
         
         # Accumulate total weight diff across all gossip steps
         weight_diffs = {c.client_id: 0.0 for c in self.clients}
         
-        for gossip_step in range(self.gossip_steps):
+        for gossip_step in range(effective_gossip_steps):
             # Determine active edges for this round
             active_edges = get_active_edges(self.graph, round_num, self.seed)
             

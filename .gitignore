@@ -45,7 +45,6 @@ logs_test/
 shared_topology.pkl
 shared_topology.gpickle
 *.log
-*.ipynb
 *.tex
 init_weights/
 data_partition/

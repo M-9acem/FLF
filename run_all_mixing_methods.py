@@ -15,7 +15,8 @@ from src.decentralized.topology import create_two_cluster_topology
 NUM_CLIENTS = 40
 ROUNDS = 200
 EPOCHS = 2
-GOSSIP_STEPS = 1  # Number of gossip iterations per round
+GOSSIP_STEPS = 1       # Used only when GOSSIP_SCHEDULE is None
+GOSSIP_SCHEDULE = None # e.g. "5:0,3:100,1:200" — overrides GOSSIP_STEPS when set
 DATASET = "cifar10"
 MAIN_LINK_PROB = 1.0
 BORDER_LINK_PROB = 1.0
@@ -24,7 +25,8 @@ INTRA_CLUSTER_PROB = 0.8
 print("="*70)
 print("RUNNING ALL MIXING METHODS SEQUENTIALLY")
 print("="*70)
-print(f"Configuration: {NUM_CLIENTS} clients, {ROUNDS} rounds, {EPOCHS} epochs, {GOSSIP_STEPS} gossip steps/round")
+gossip_desc = f"schedule {GOSSIP_SCHEDULE}" if GOSSIP_SCHEDULE else f"{GOSSIP_STEPS} gossip steps/round"
+print(f"Configuration: {NUM_CLIENTS} clients, {ROUNDS} rounds, {EPOCHS} epochs, {gossip_desc}")
 print(f"Dataset: {DATASET}")
 print("="*70)
 
@@ -107,10 +109,13 @@ for i, (method, description) in enumerate(methods, 1):
         "--model", "resnet8",
         "--experiment_name", experiment_name,
         "--topology_file", str(shared_topology_path),
-        "--gossip_steps", str(GOSSIP_STEPS),
         "--init_weights", str(shared_w0_path),
         "--partition_file", str(partition_file)
     ]
+    if GOSSIP_SCHEDULE:
+        cmd += ["--gossip_schedule", GOSSIP_SCHEDULE]
+    else:
+        cmd += ["--gossip_steps", str(GOSSIP_STEPS)]
     
     method_start = datetime.now()
     
