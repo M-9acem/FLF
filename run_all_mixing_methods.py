@@ -1,167 +1,239 @@
 #!/usr/bin/env python
-"""Run all mixing methods sequentially for comparison using the same topology."""
+"""Run all mixing methods sequentially for comparison using the same topology.
 
+Usage:
+    # Use hardcoded defaults (backward-compatible):
+    python run_all_mixing_methods.py
+
+    # Run multiple experiments from a YAML file:
+    python run_all_mixing_methods.py --experiments_yaml experiments.yaml
+"""
+
+import argparse
 import subprocess
 import sys
 from datetime import datetime
 import pickle
 from pathlib import Path
 
-# Add src to path for imports
+import yaml
+
+# src path — topology import is deferred inside resolve_topology() to avoid
+# loading torch at import time (keeps --help instant)
 sys.path.insert(0, str(Path(__file__).parent))
-from src.decentralized.topology import create_two_cluster_topology
 
-# Configuration - QUICK TEST
-NUM_CLIENTS = 40
-ROUNDS = 200
-EPOCHS = 2
-GOSSIP_STEPS = 1       # Used only when GOSSIP_SCHEDULE is None
-GOSSIP_SCHEDULE = None # e.g. "5:0,3:100,1:200" — overrides GOSSIP_STEPS when set
-DATASET = "cifar10"
-MAIN_LINK_PROB = 1.0
-BORDER_LINK_PROB = 1.0
-INTRA_CLUSTER_PROB = 0.8
+# ── Default configuration (used when no YAML is provided) ──────────────────
+DEFAULTS = dict(
+    num_clients       = 40,
+    rounds            = 200,
+    epochs            = 2,
+    gossip_steps      = 1,
+    gossip_schedule   = None,   # e.g. "5:0,3:100,1:200" — overrides gossip_steps
+    dataset           = "cifar10",
+    model             = "resnet8",
+    main_link_prob    = 1.0,
+    border_link_prob  = 1.0,
+    intra_cluster_prob= 0.8,
+    topology_file     = None,   # auto-managed if None
+    init_weights      = None,   # auto-managed if None
+    partition_file    = None,   # auto-managed if None
+    methods           = None,   # None → run all 5
+)
 
-print("="*70)
-print("RUNNING ALL MIXING METHODS SEQUENTIALLY")
-print("="*70)
-gossip_desc = f"schedule {GOSSIP_SCHEDULE}" if GOSSIP_SCHEDULE else f"{GOSSIP_STEPS} gossip steps/round"
-print(f"Configuration: {NUM_CLIENTS} clients, {ROUNDS} rounds, {EPOCHS} epochs, {gossip_desc}")
-print(f"Dataset: {DATASET}")
-print("="*70)
-
-# Canonical topology — load if exists, generate and save if not
-print("\n" + "="*70)
-print("SHARED TOPOLOGY (used by all methods)")
-print("="*70)
-shared_topology_path = Path("shared_topology.pkl")
-if shared_topology_path.exists():
-    print(f"Loading existing topology from: {shared_topology_path}")
-    with open(shared_topology_path, 'rb') as f:
-        graph = pickle.load(f)
-else:
-    print("Topology file not found — generating and saving ...")
-    graph = create_two_cluster_topology(
-        num_clients=NUM_CLIENTS,
-        main_link_prob=MAIN_LINK_PROB,
-        border_link_prob=BORDER_LINK_PROB,
-        intra_cluster_prob=INTRA_CLUSTER_PROB,
-        intra_cluster_communication=False
-    )
-    with open(shared_topology_path, 'wb') as f:
-        pickle.dump(graph, f)
-    print(f"Topology saved to: {shared_topology_path} (will be reused in future runs)")
-print(f"Graph: {graph.number_of_nodes()} nodes, {graph.number_of_edges()} edges")
-print("All mixing methods will use this same topology!")
-print("="*70)
-
-# Canonical initial weights — generated once by generate_init_weights.py
-shared_w0_path = Path('init_weights') / 'resnet8_w0.pt'
-if not shared_w0_path.exists():
-    print(f'\nInitial weights not found: {shared_w0_path}')
-    print('Running generate_init_weights.py to create them ...')
-    subprocess.run([sys.executable, 'generate_init_weights.py'], check=True)
-print(f'\nUsing canonical initial weights: {shared_w0_path}')
-print('All mixing methods will start from these same weights!')
-print('='*70)
-
-# Canonical partition — generated once by generate_partition.py
-partition_file = Path('data_partition') / f'{DATASET}_N{NUM_CLIENTS}_dirichlet_a0.5.pkl'
-if not partition_file.exists():
-    print(f'\nPartition file not found: {partition_file}')
-    print('Running generate_partition.py to create it ...')
-    import subprocess as _sp
-    _sp.run([sys.executable, 'generate_partition.py'], check=True)
-    if not partition_file.exists():
-        raise FileNotFoundError(
-            f'generate_partition.py ran but {partition_file} was not created.\n'
-            f'Check that CONFIGS in generate_partition.py includes N={NUM_CLIENTS}.'
-        )
-print(f'\nUsing canonical data partition: {partition_file}')
-print('All mixing methods will train on identical client data splits!')
-print('='*70)
-
-methods = [
-    ("metropolis_hastings", "Metropolis-Hastings (Default)"),
-    ("max_degree", "Max-Degree (Uniform Weights)"),
-    ("jaccard", "Jaccard Similarity"),
+ALL_METHODS = [
+    ("metropolis_hastings",   "Metropolis-Hastings (Default)"),
+    ("max_degree",            "Max-Degree (Uniform Weights)"),
+    ("jaccard",               "Jaccard Similarity"),
     ("jaccard_dissimilarity", "Jaccard Dissimilarity (Avrachenkov)"),
-    ("matcha", "MATCHA (Optimal)")
+    ("matcha",                "MATCHA (Optimal)"),
 ]
 
-results = []
-start_time = datetime.now()
 
-for i, (method, description) in enumerate(methods, 1):
-    print(f"\n{'='*70}")
-    print(f"[{i}/4] Running: {description}")
-    print(f"{'='*70}\n")
-    
-    experiment_name = f"{method}_comparison"
-    
-    cmd = [
-        sys.executable, "main.py",
-        "--type", "decentralized",
-        "--mixing_method", method,
-        "--num_clients", str(NUM_CLIENTS),
-        "--rounds", str(ROUNDS),
-        "--epochs", str(EPOCHS),
-        "--dataset", DATASET,
-        "--model", "resnet8",
-        "--experiment_name", experiment_name,
-        "--topology_file", str(shared_topology_path),
-        "--init_weights", str(shared_w0_path),
-        "--partition_file", str(partition_file)
-    ]
-    if GOSSIP_SCHEDULE:
-        cmd += ["--gossip_schedule", GOSSIP_SCHEDULE]
+# ── Artefact helpers ────────────────────────────────────────────────────────
+
+def resolve_topology(cfg: dict) -> Path:
+    if cfg.get("topology_file"):
+        path = Path(cfg["topology_file"])
+        print(f"  topology : {path} (specified)")
+        return path
+    exp_name = cfg.get("name", "default")
+    path = Path(f"shared_topology_{exp_name}.pkl")
+    if path.exists():
+        print(f"  topology : {path} (cached)")
     else:
-        cmd += ["--gossip_steps", str(GOSSIP_STEPS)]
-    
-    method_start = datetime.now()
-    
-    try:
-        result = subprocess.run(cmd, check=True)
-        status = "✓ SUCCESS"
-        results.append((method, description, status, experiment_name))
-    except subprocess.CalledProcessError as e:
-        status = f"✗ FAILED (exit code {e.returncode})"
-        results.append((method, description, status, experiment_name))
-    
-    method_end = datetime.now()
-    duration = (method_end - method_start).total_seconds() / 60
-    print(f"\n{description} completed in {duration:.1f} minutes")
+        print(f"  topology : {path} (generating ...)")
+        from src.decentralized.topology import create_two_cluster_topology
+        graph = create_two_cluster_topology(
+            num_clients           = cfg["num_clients"],
+            main_link_prob        = cfg["main_link_prob"],
+            border_link_prob      = cfg["border_link_prob"],
+            intra_cluster_prob    = cfg["intra_cluster_prob"],
+            intra_cluster_communication = False,
+        )
+        with open(path, "wb") as f:
+            pickle.dump(graph, f)
+        print(f"    saved to {path}")
+    return path
 
-end_time = datetime.now()
-total_duration = (end_time - start_time).total_seconds() / 60
 
-# Print summary
-print("\n" + "="*70)
-print("EXECUTION SUMMARY")
-print("="*70)
+def resolve_init_weights(cfg: dict) -> Path:
+    if cfg.get("init_weights"):
+        path = Path(cfg["init_weights"])
+        print(f"  weights  : {path} (specified)")
+        return path
+    path = Path("init_weights") / f"{cfg['model']}_w0.pt"
+    if not path.exists():
+        print(f"  weights  : {path} not found — running generate_init_weights.py ...")
+        subprocess.run([sys.executable, "generate_init_weights.py"], check=True)
+    print(f"  weights  : {path}")
+    return path
 
-for method, description, status, exp_name in results:
-    print(f"{description:30s} {status:20s} logs_test/{exp_name}/")
 
-print(f"\nTotal time: {total_duration:.1f} minutes")
-print("="*70)
+def resolve_partition(cfg: dict) -> Path:
+    if cfg.get("partition_file"):
+        path = Path(cfg["partition_file"])
+        print(f"  partition: {path} (specified)")
+        return path
+    n  = cfg["num_clients"]
+    ds = cfg["dataset"]
+    path = Path("data_partition") / f"{ds}_N{n}_dirichlet_a0.5.pkl"
+    if not path.exists():
+        print(f"  partition: {path} not found — running generate_partition.py ...")
+        subprocess.run([sys.executable, "generate_partition.py"], check=True)
+        if not path.exists():
+            raise FileNotFoundError(
+                f"generate_partition.py ran but {path} was not created.\n"
+                f"Check that CONFIGS in generate_partition.py includes N={n}."
+            )
+    print(f"  partition: {path}")
+    return path
 
-# Print analysis instructions
-print("\n" + "="*70)
-print("NEXT STEPS - ANALYZE RESULTS")
-print("="*70)
-print("\n1. Compare results in logs/ directory:")
-for method, _, _, exp_name in results:
-    print(f"   - logs_test/{exp_name}/")
 
-print("\n2. Use analysis.ipynb to visualize each experiment")
-print("\n3. Compare convergence rates across methods:")
-print("   - Load round_summary.csv from each experiment")
-print("   - Plot avg_accuracy vs round for all methods")
-print("\n4. Expected differences:")
-print("   - Metropolis-Hastings: Baseline, proven convergence")
-print("   - Max-Degree: Similar to MH, slightly different weights")
-print("   - Jaccard: May converge faster on clustered topology")
-print("   - MATCHA: Optimal (if cvxpy available), else same as MH")
+# ── Core runner ─────────────────────────────────────────────────────────────
 
-print("\n" + "="*70)
+def run_experiment(cfg: dict) -> list:
+    """Run all (or a subset of) mixing methods for one experiment config."""
+    exp_name      = cfg.get("name", "experiment")
+    n_clients     = cfg["num_clients"]
+    rounds        = cfg["rounds"]
+    epochs        = cfg["epochs"]
+    dataset       = cfg["dataset"]
+    model         = cfg["model"]
+    gossip_sched  = cfg.get("gossip_schedule")
+    gossip_steps  = cfg.get("gossip_steps", 1)
+
+    gossip_desc = f"schedule {gossip_sched}" if gossip_sched else f"{gossip_steps} gossip steps/round"
+
+    print("\n" + "="*70)
+    print(f"EXPERIMENT: {exp_name}")
+    print("="*70)
+    print(f"  clients={n_clients}, rounds={rounds}, epochs={epochs}, {gossip_desc}")
+    print(f"  dataset={dataset}, model={model}")
+
+    topology_path  = resolve_topology(cfg)
+    init_weights   = resolve_init_weights(cfg)
+    partition_path = resolve_partition(cfg)
+
+    # Which methods to run
+    requested = cfg.get("methods")
+    if requested:
+        methods = [(m, d) for m, d in ALL_METHODS if m in requested]
+        missing = set(requested) - {m for m, _ in ALL_METHODS}
+        if missing:
+            print(f"  WARNING: unknown method(s) in YAML config: {missing}")
+    else:
+        methods = ALL_METHODS
+
+    print(f"  methods  : {[m for m, _ in methods]}")
+    print("="*70)
+
+    results = []
+    exp_start = datetime.now()
+    total = len(methods)
+
+    for i, (method, description) in enumerate(methods, 1):
+        print(f"\n  [{i}/{total}] {description}")
+        full_exp_name = f"{exp_name}__{method}"
+
+        cmd = [
+            sys.executable, "main.py",
+            "--type",            "decentralized",
+            "--mixing_method",   method,
+            "--num_clients",     str(n_clients),
+            "--rounds",          str(rounds),
+            "--epochs",          str(epochs),
+            "--dataset",         dataset,
+            "--model",           model,
+            "--experiment_name", full_exp_name,
+            "--topology_file",   str(topology_path),
+            "--init_weights",    str(init_weights),
+            "--partition_file",  str(partition_path),
+        ]
+        if gossip_sched:
+            cmd += ["--gossip_schedule", gossip_sched]
+        else:
+            cmd += ["--gossip_steps", str(gossip_steps)]
+
+        method_start = datetime.now()
+        try:
+            subprocess.run(cmd, check=True)
+            status = "SUCCESS"
+        except subprocess.CalledProcessError as e:
+            status = f"FAILED (exit {e.returncode})"
+        duration = (datetime.now() - method_start).total_seconds() / 60
+        print(f"  → {status} ({duration:.1f} min)")
+        results.append((exp_name, method, description, status, full_exp_name))
+
+    exp_duration = (datetime.now() - exp_start).total_seconds() / 60
+    print(f"\n  Experiment '{exp_name}' finished in {exp_duration:.1f} min")
+    return results
+
+
+# ── Entry point ─────────────────────────────────────────────────────────────
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Run mixing-method comparison, optionally driven by a YAML experiments file."
+    )
+    parser.add_argument(
+        "--experiments_yaml", type=str, default=None,
+        metavar="FILE",
+        help="YAML file with a list of experiment configs (see experiments.yaml for format)."
+    )
+    args = parser.parse_args()
+
+    all_results = []
+    global_start = datetime.now()
+
+    if args.experiments_yaml:
+        yaml_path = Path(args.experiments_yaml)
+        if not yaml_path.exists():
+            sys.exit(f"Error: experiments file not found: {yaml_path}")
+        with open(yaml_path) as f:
+            doc = yaml.safe_load(f)
+        experiments = doc.get("experiments", [])
+        if not experiments:
+            sys.exit("Error: YAML file has no 'experiments' list.")
+        print(f"Loaded {len(experiments)} experiment(s) from {yaml_path}")
+        for raw in experiments:
+            cfg = {**DEFAULTS, **raw}
+            all_results.extend(run_experiment(cfg))
+    else:
+        # Backward-compatible single run with hardcoded DEFAULTS
+        cfg = {**DEFAULTS, "name": "default"}
+        all_results.extend(run_experiment(cfg))
+
+    total_time = (datetime.now() - global_start).total_seconds() / 60
+
+    print("\n" + "="*70)
+    print("FINAL SUMMARY")
+    print("="*70)
+    for exp, method, desc, status, full_name in all_results:
+        mark = "✓" if status == "SUCCESS" else "✗"
+        print(f"  {mark} [{exp}] {desc:40s} {status}")
+    print(f"\nTotal wall time: {total_time:.1f} min")
+    print("="*70)
+
+
+if __name__ == "__main__":
+    main()

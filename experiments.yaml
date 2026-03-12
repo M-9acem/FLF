@@ -1,0 +1,43 @@
+# Experiments configuration for run_all_mixing_methods.py
+#
+# Usage:
+#   python run_all_mixing_methods.py --experiments_yaml experiments.yaml
+#
+# Each experiment entry can override any of the defaults below.
+# Defaults (if a key is omitted):
+#   num_clients: 40
+#   rounds: 200
+#   epochs: 2
+#   gossip_steps: 1
+#   gossip_schedule: null
+#   dataset: cifar10
+#   model: resnet8
+#   main_link_prob: 1.0
+#   border_link_prob: 1.0
+#   intra_cluster_prob: 0.8
+#   topology_file: null   (auto-generated as shared_topology_<name>.pkl)
+#   init_weights: null    (auto-resolved as init_weights/<model>_w0.pt)
+#   partition_file: null  (auto-resolved as data_partition/<dataset>_N<n>_dirichlet_a0.5.pkl)
+#   methods: null         (null = run all 5 methods)
+
+experiments:
+
+  # ── All methods, N=40, fixed 3 gossip steps/round ─────────────────────────
+  - name: N40_gossip3
+    num_clients: 40
+    rounds: 200
+    epochs: 2
+    gossip_steps: 3
+    dataset: cifar10
+    model: resnet8
+    # methods not specified → runs all 5
+
+  # ── All methods, N=40, decreasing gossip schedule ─────────────────────────
+  - name: N40_gossip_schedule
+    num_clients: 40
+    rounds: 200
+    epochs: 2
+    gossip_schedule: "5:0,3:67,1:134"   # 5 steps rounds 0-66, 3 steps 67-133, 1 step 134-199
+    dataset: cifar10
+    model: resnet8
+    # methods not specified → runs all 5
