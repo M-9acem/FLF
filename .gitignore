@@ -40,6 +40,7 @@ data/
 # Logs
 logs/
 logs_test/
+report/
 
 # Generated / temporary files
 shared_topology.pkl
