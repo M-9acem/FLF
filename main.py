@@ -450,7 +450,7 @@ def main():
         '--mixing_method',
         type=str,
         default='metropolis_hastings',
-        choices=['metropolis_hastings', 'max_degree', 'jaccard', 'matcha'],
+        choices=['metropolis_hastings', 'max_degree', 'jaccard', 'jaccard_dissimilarity', 'matcha'],
         help='Mixing matrix method for gossip aggregation'
     )
     parser.add_argument('--gossip_steps', type=int, default=1, help='Number of gossip iterations per round before next training')

@@ -118,16 +118,33 @@ DATASET         = "cifar10"
 FederatedLearningFramework/
 ├── main.py                      # Main entry point with CLI
 ├── run_all_mixing_methods.py    # Batch runner: all 4 methods, identical conditions
+├── run_full_comparison.py       # Extended comparison runner
+├── run_slurm.sh                 # SLURM job script for cluster execution
 ├── generate_partition.py        # Pre-generate canonical data partitions
 ├── generate_init_weights.py     # Pre-generate canonical initial model weights
+├── data_analysis.ipynb          # Analysis and visualization notebook
 ├── shared_topology.pkl          # Canonical topology (committed, 40 nodes/39 edges)
 ├── requirements.txt             # Python dependencies
 ├── README.md                    # This file
-├── init_weights/                # Canonical initial weights per model
+├── .gitignore
+├── init_weights/                # Canonical initial weights per model (all architectures)
 │   ├── lenet5_w0.pt
-│   └── resnet8_w0.pt
+│   ├── resnet8_w0.pt
+│   ├── resnet18_w0.pt
+│   ├── resnet50_w0.pt
+│   └── simple_cnn_w0.pt
 ├── data_partition/              # Pre-generated data partitions (gitignored)
+│   ├── cifar10_N4_dirichlet_a0.5.pkl
+│   ├── cifar10_N10_dirichlet_a0.5.pkl
 │   └── cifar10_N40_dirichlet_a0.5.pkl
+├── config/                      # Example configuration files
+│   ├── example_centralized.yaml
+│   └── example_decentralized.yaml
+├── plots/                       # Saved comparison plots (cross-experiment)
+├── lib/                         # Frontend libraries for topology visualizer
+│   ├── bindings/utils.js
+│   ├── tom-select/
+│   └── vis-9.1.2/
 ├── src/
 │   ├── centralized/             # FedAvg implementation
 │   │   ├── client.py
@@ -139,13 +156,13 @@ FederatedLearningFramework/
 │   ├── models/
 │   │   ├── lenet5.py
 │   │   ├── simple_cnn.py
-│   │   └── resnet.py
+│   │   └── resnet.py            # ResNet8 / ResNet18 / ResNet50
 │   └── utils/
+│       ├── data_loader.py       # Partitioning (IID, Dirichlet, Pathological)
 │       ├── logger.py
 │       ├── comprehensive_logger.py
-│       ├── data_loader.py       # Partitioning (IID, Dirichlet, Pathological)
 │       └── visualization.py
-├── data/                        # Downloaded datasets
+├── data/                        # Downloaded datasets (CIFAR-10, MNIST, …)
 └── logs/                        # Experiment logs and results
     └── experiment_name/
         └── YYYY-MM-DD_HH-MM-SS/
@@ -154,8 +171,10 @@ FederatedLearningFramework/
             ├── gradient_tracking.csv
             ├── communication_logs.csv
             ├── round_summary.csv
+            ├── partition_stats.csv
             ├── config.json
             ├── network_topology.html
+            ├── topology_info.txt
             └── plots/
 ```
 

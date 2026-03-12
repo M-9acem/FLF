@@ -11,7 +11,7 @@ except ImportError:
     CVXPY_AVAILABLE = False
 
 # Type alias for mixing methods
-MixingMethod = Literal['metropolis_hastings', 'max_degree', 'jaccard', 'matcha']
+MixingMethod = Literal['metropolis_hastings', 'max_degree', 'jaccard', 'jaccard_dissimilarity', 'matcha']
 
 # Module-level cache for MATCHA weights (avoid re-solving CVX every round)
 _matcha_cache: Dict[int, np.ndarray] = {}
@@ -125,6 +125,8 @@ def create_mixing_matrix(
         return _max_degree_weights(graph, num_clients)
     elif method == 'jaccard':
         return _jaccard_weights(graph, num_clients)
+    elif method == 'jaccard_dissimilarity':
+        return _jaccard_dissimilarity_weights(graph, num_clients)
     elif method == 'matcha':
         return _matcha_weights(graph, num_clients)
     else:
@@ -182,48 +184,91 @@ def _max_degree_weights(graph: nx.Graph, num_clients: int) -> np.ndarray:
 
 
 def _jaccard_weights(graph: nx.Graph, num_clients: int) -> np.ndarray:
-    """Jaccard similarity-based mixing weights.
-    
-    Weight based on Jaccard similarity of neighborhoods:
-    J(i,j) = |N(i) ∩ N(j)| / |N(i) ∪ N(j)|
-    Weight = 1 - J(i,j), then normalized to doubly stochastic
     """
-    W = np.zeros((num_clients, num_clients))
-    
+    Jaccard dissimilarity mixing weights (standalone variant).
+
+    For each edge (i,j), using closed neighborhoods N[i] = {i} ∪ neighbors(i):
+        J(i,j)  = |N[i] ∩ N[j]| / |N[i] ∪ N[j]|   (Jaccard similarity)
+        y_ij    = 1 - J(i,j)                          (dissimilarity → weight)
+
+    Normalization:
+        - Per-node row normalization if row sum > 1
+        - Symmetrize: w_ij = min(y_ij, y_ji)
+        - Self-loop:  w_ii = 1 - sum of off-diagonal row weights
+    """
     if len(graph.edges()) == 0:
         return np.eye(num_clients)
-    
-    nodes = list(range(num_clients))
-    
-    # Compute Jaccard-based weights
-    for i in nodes:
-        neighbors_i = set(graph.neighbors(i))
-        set_i = neighbors_i | {i}  # Include self
-        
-        for j in neighbors_i:
-            set_j = set(graph.neighbors(j)) | {j}
-            
-            # Jaccard similarity: intersection over union
-            intersection = len(set_i & set_j)
-            union = len(set_i | set_j)
-            
-            # Weight is 1 - Jaccard similarity
-            W[i, j] = 1.0 - intersection / union
-            W[j, i] = 1.0 - intersection / union
-    
-    # Normalize: scale by maximum flow to ensure stability
-    flows = np.sum(W, axis=0)
-    global_scaling_factor = np.max(flows)
-    
-    if global_scaling_factor > 0:
-        W /= (global_scaling_factor + 1e-10)
-    
-    # Add self-loops to make rows sum to 1
+
+    # Step 1: compute raw directed weights
+    Y = np.zeros((num_clients, num_clients))
     for i in range(num_clients):
-        W[i, i] = max(1.0 - np.sum(W[i, :]), 0.0)
-    
+        set_i = set(graph.neighbors(i)) | {i}
+        for j in graph.neighbors(i):
+            set_j = set(graph.neighbors(j)) | {j}
+            intersection = len(set_i & set_j)
+            union        = len(set_i | set_j)
+            Y[i, j] = 1.0 - intersection / union  # in [0, 1]
+
+    # Step 2: per-node row normalization (only rescales if sum > 1)
+    for i in range(num_clients):
+        row_sum = Y[i, :].sum()
+        if row_sum > 1.0:
+            Y[i, :] /= row_sum
+
+    # Step 3: symmetrize via min, then self-loops
+    W = np.zeros((num_clients, num_clients))
+    for i in range(num_clients):
+        for j in graph.neighbors(i):
+            W[i, j] = min(Y[i, j], Y[j, i])
+        W[i, i] = max(1.0 - W[i, :].sum(), 0.0)
+
+    # Sanity check (remove in production)
+    assert np.allclose(W, W.T, atol=1e-6), "W is not symmetric"
+    assert np.all(W >= 0),                 "W has negative entries"
+    assert np.allclose(W.sum(axis=1), 1.0, atol=1e-6), "Rows don't sum to 1"
+
     return W
 
+def _jaccard_dissimilarity_weights(graph: nx.Graph, num_clients: int) -> np.ndarray:
+    """
+    Neighborhood Algorithm mixing weights (Avrachenkov et al., 2011).
+    Uses closed neighborhoods N[i] = {i} ∪ neighbors(i).
+
+    For each edge (i, j):
+        y_ij = 1 - |N[i] ∩ N[j]| / (1 + 2*min(|N[i]|, |N[j]|) - |N[i] ∩ N[j]|)
+
+    Then per Algorithm 1:
+      - Per-node row normalization if row sum > 1
+      - Symmetrize: w_ij = min(y_ij, y_ji)
+      - Self-loop: w_ii = 1 - sum of off-diagonal weights
+    """
+    if len(graph.edges()) == 0:
+        return np.eye(num_clients)
+
+    # Step 2: compute raw y_ij for each directed edge
+    Y = np.zeros((num_clients, num_clients))
+    for i in range(num_clients):
+        set_i = set(graph.neighbors(i)) | {i}
+        for j in graph.neighbors(i):
+            set_j = set(graph.neighbors(j)) | {j}
+            intersection = len(set_i & set_j)
+            denom = 1 + 2 * min(len(set_i), len(set_j)) - intersection
+            Y[i, j] = 1.0 - intersection / denom
+
+    # Step 3: per-node row normalization (only if row sum > 1)
+    for i in range(num_clients):
+        row_sum = np.sum(Y[i, :])
+        if row_sum > 1.0:
+            Y[i, :] /= row_sum
+
+    # Step 5: symmetrize with min, then self-loops
+    W = np.zeros((num_clients, num_clients))
+    for i in range(num_clients):
+        for j in graph.neighbors(i):
+            W[i, j] = min(Y[i, j], Y[j, i])
+        W[i, i] = max(1.0 - np.sum(W[i, :]), 0.0)
+
+    return W
 
 def _matcha_weights(graph: nx.Graph, num_clients: int) -> np.ndarray:
     """MATCHA (Optimal) mixing weights using convex optimization.
@@ -398,6 +443,8 @@ def get_active_mixing_matrix(
         return _active_max_degree(graph, num_clients, active_edges)
     elif method == 'jaccard':
         return _active_jaccard(graph, num_clients, active_edges)
+    elif method == 'jaccard_dissimilarity':
+        return _active_jaccard_dissimilarity(graph, num_clients, active_edges)
     elif method == 'matcha':
         return _active_matcha(graph, num_clients, active_edges)
     else:
@@ -474,45 +521,102 @@ def _active_jaccard(
     num_clients: int,
     active_edges: Dict[Tuple[int, int], bool]
 ) -> np.ndarray:
-    """Jaccard with active edges only."""
-    W = np.zeros((num_clients, num_clients))
-    
-    # Build active neighborhood sets
-    active_neighbors_map = {}
-    for node in range(num_clients):
-        neighbors = list(graph.neighbors(node))
-        active_neighbors_map[node] = set(n for n in neighbors 
-                                         if active_edges.get((node, n), False))
-    
-    # Check if any active edges exist
+    """Jaccard dissimilarity with active edges only.
+
+    Mirrors the same Algorithm 1 steps as _jaccard_weights:
+      1. Compute raw y_ij = 1 - |N[i] ∩ N[j]| / |N[i] ∪ N[j]| (closed neighborhoods)
+      2. Per-node row normalisation if row sum > 1
+      3. Symmetrize: w_ij = min(y_ij, y_ji)
+      4. Self-loop: w_ii = 1 - sum of off-diagonal weights
+    """
+    # Build active closed neighborhood sets
+    active_neighbors_map = {
+        node: set(
+            n for n in graph.neighbors(node)
+            if active_edges.get((node, n), False)
+        )
+        for node in range(num_clients)
+    }
+
     if all(len(ns) == 0 for ns in active_neighbors_map.values()):
         return np.eye(num_clients)
-    
-    # Compute Jaccard weights for active edges
+
+    # Step 1: raw directed weights
+    Y = np.zeros((num_clients, num_clients))
     for i in range(num_clients):
-        neighbors_i = active_neighbors_map[i]
-        set_i = neighbors_i | {i}
-        
-        for j in neighbors_i:
+        set_i = active_neighbors_map[i] | {i}
+        for j in active_neighbors_map[i]:
             set_j = active_neighbors_map[j] | {j}
-            
             intersection = len(set_i & set_j)
-            union = len(set_i | set_j)
-            
-            if union > 0:
-                W[i, j] = 1.0 - intersection / union
-    
-    # Normalize
-    flows = np.sum(W, axis=0)
-    global_scaling_factor = np.max(flows)
-    
-    if global_scaling_factor > 0:
-        W /= (global_scaling_factor + 1e-10)
-    
-    # Self-loops
+            union        = len(set_i | set_j)
+            Y[i, j] = 1.0 - intersection / union
+
+    # Step 2: per-node row normalisation (only if sum > 1)
     for i in range(num_clients):
+        row_sum = Y[i, :].sum()
+        if row_sum > 1.0:
+            Y[i, :] /= row_sum
+
+    # Step 3 & 4: symmetrize via min, then self-loops
+    W = np.zeros((num_clients, num_clients))
+    for i in range(num_clients):
+        for j in active_neighbors_map[i]:
+            W[i, j] = min(Y[i, j], Y[j, i])
+        W[i, i] = max(1.0 - W[i, :].sum(), 0.0)
+
+    return W
+
+
+def _active_jaccard_dissimilarity(
+    graph: nx.Graph,
+    num_clients: int,
+    active_edges: Dict[Tuple[int, int], bool]
+) -> np.ndarray:
+    """Neighborhood Algorithm (Avrachenkov et al., 2011) with active edges only.
+
+    Uses closed neighborhoods restricted to currently active edges:
+        N_active[i] = {i} ∪ {j : (i,j) active}
+    Mirrors the same Algorithm 1 steps as _jaccard_dissimilarity_weights:
+      1. Compute raw y_ij for each active directed edge
+      2. Per-node row normalisation if row sum > 1
+      3. Symmetrize: w_ij = min(y_ij, y_ji)
+      4. Self-loop: w_ii = 1 - sum of off-diagonal weights
+    """
+    # Build active closed neighborhood sets
+    active_neighbors_map = {
+        node: set(
+            n for n in graph.neighbors(node)
+            if active_edges.get((node, n), False)
+        )
+        for node in range(num_clients)
+    }
+
+    if all(len(ns) == 0 for ns in active_neighbors_map.values()):
+        return np.eye(num_clients)
+
+    # Step 1: raw y_ij for each active directed edge
+    Y = np.zeros((num_clients, num_clients))
+    for i in range(num_clients):
+        set_i = active_neighbors_map[i] | {i}
+        for j in active_neighbors_map[i]:
+            set_j = active_neighbors_map[j] | {j}
+            intersection = len(set_i & set_j)
+            denom = 1 + 2 * min(len(set_i), len(set_j)) - intersection
+            Y[i, j] = 1.0 - intersection / denom
+
+    # Step 2: per-node row normalisation (only if row sum > 1)
+    for i in range(num_clients):
+        row_sum = np.sum(Y[i, :])
+        if row_sum > 1.0:
+            Y[i, :] /= row_sum
+
+    # Step 3 & 4: symmetrize with min, then self-loops
+    W = np.zeros((num_clients, num_clients))
+    for i in range(num_clients):
+        for j in active_neighbors_map[i]:
+            W[i, j] = min(Y[i, j], Y[j, i])
         W[i, i] = max(1.0 - np.sum(W[i, :]), 0.0)
-    
+
     return W
 
 
