@@ -85,6 +85,7 @@ methods = [
     ("metropolis_hastings", "Metropolis-Hastings (Default)"),
     ("max_degree", "Max-Degree (Uniform Weights)"),
     ("jaccard", "Jaccard Similarity"),
+    ("jaccard_dissimilarity", "Jaccard Dissimilarity (Avrachenkov)"),
     ("matcha", "MATCHA (Optimal)")
 ]
 
