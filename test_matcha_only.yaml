@@ -1,0 +1,11 @@
+experiments:
+  - name: test_N6_matcha_only
+    num_clients: 6
+    rounds: 3
+    epochs: 1
+    gossip_schedule: "5:0,3:1,1:2"
+    matcha_comm_budget: 0.5
+    dataset: cifar10
+    model: resnet8
+    methods:
+      - matcha

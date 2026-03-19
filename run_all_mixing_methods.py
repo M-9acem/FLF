@@ -34,6 +34,7 @@ DEFAULTS = dict(
     main_link_prob    = 1.0,
     border_link_prob  = 1.0,
     intra_cluster_prob= 0.8,
+    matcha_comm_budget= 0.5,
     topology_file     = None,   # auto-managed if None
     init_weights      = None,   # auto-managed if None
     partition_file    = None,   # auto-managed if None
@@ -168,6 +169,7 @@ def run_experiment(cfg: dict) -> list:
             "--topology_file",   str(topology_path),
             "--init_weights",    str(init_weights),
             "--partition_file",  str(partition_path),
+            "--matcha_comm_budget", str(cfg.get("matcha_comm_budget", 0.5)),
         ]
         if gossip_sched:
             cmd += ["--gossip_schedule", gossip_sched]
@@ -181,7 +183,7 @@ def run_experiment(cfg: dict) -> list:
         except subprocess.CalledProcessError as e:
             status = f"FAILED (exit {e.returncode})"
         duration = (datetime.now() - method_start).total_seconds() / 60
-        print(f"  → {status} ({duration:.1f} min)")
+        print(f"  -> {status} ({duration:.1f} min)")
         results.append((exp_name, method, description, status, full_exp_name))
 
     exp_duration = (datetime.now() - exp_start).total_seconds() / 60
@@ -229,7 +231,7 @@ def main():
     print("FINAL SUMMARY")
     print("="*70)
     for exp, method, desc, status, full_name in all_results:
-        mark = "✓" if status == "SUCCESS" else "✗"
+        mark = "OK" if status == "SUCCESS" else "X"
         print(f"  {mark} [{exp}] {desc:40s} {status}")
     print(f"\nTotal wall time: {total_time:.1f} min")
     print("="*70)

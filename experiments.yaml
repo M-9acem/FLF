@@ -30,7 +30,17 @@ experiments:
     gossip_steps: 3
     dataset: cifar10
     model: resnet8
+    
     # methods not specified → runs all 5
+
+  # ── Quick smoke test: N=6, gossip drops 5→3→1 over 3 rounds ──────────────
+  - name: test_N6_gossip_drop
+    num_clients: 6
+    rounds: 3
+    epochs: 1
+    gossip_schedule: "5:0,3:1,1:2"   # 5 steps round 0, 3 steps round 1, 1 step round 2
+    dataset: cifar10
+    model: resnet8
 
   # ── All methods, N=40, decreasing gossip schedule ─────────────────────────
   - name: N40_gossip_schedule

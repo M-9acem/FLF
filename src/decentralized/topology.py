@@ -1,20 +1,32 @@
 """Network topology creation for P2P federated learning."""
 
+import importlib.util
+import os
+from pathlib import Path
 import networkx as nx
 import numpy as np
-from typing import Tuple, Dict, Literal
-
-try:
-    import cvxpy as cp
-    CVXPY_AVAILABLE = True
-except ImportError:
-    CVXPY_AVAILABLE = False
+from typing import Tuple, Dict, Literal, Any
 
 # Type alias for mixing methods
 MixingMethod = Literal['metropolis_hastings', 'max_degree', 'jaccard', 'jaccard_dissimilarity', 'matcha']
 
-# Module-level cache for MATCHA weights (avoid re-solving CVX every round)
+# Module-level cache for MATCHA artifacts (avoid re-solving every round)
 _matcha_cache: Dict[int, np.ndarray] = {}
+_matcha_meta_cache: Dict[int, Dict[str, Any]] = {}
+
+
+def _matcha_debug_enabled(graph: nx.Graph = None) -> bool:
+    env = os.getenv('MATCHA_DEBUG', '').strip().lower()
+    if env in {'1', 'true', 'yes', 'on'}:
+        return True
+    if graph is not None and bool(graph.graph.get('matcha_debug', False)):
+        return True
+    return False
+
+
+def _matcha_log(msg: str, graph: nx.Graph = None) -> None:
+    if _matcha_debug_enabled(graph):
+        print(f"[MATCHA] {msg}")
 
 
 def create_two_cluster_topology(
@@ -271,130 +283,123 @@ def _jaccard_dissimilarity_weights(graph: nx.Graph, num_clients: int) -> np.ndar
     return W
 
 def _matcha_weights(graph: nx.Graph, num_clients: int) -> np.ndarray:
-    """MATCHA (Optimal) mixing weights using convex optimization.
-    
-    Uses CVX optimization to find optimal edge activation probabilities
-    and mixing weights for fastest convergence.
-    
-    Requires: cvxpy library
-    """
-    if not CVXPY_AVAILABLE:
-        print("Warning: cvxpy not available. Falling back to Metropolis-Hastings.")
-        return _metropolis_hastings_weights(graph, num_clients)
-    
+    """MATCHA expected mixing matrix using cloned MATCHA MatchaProcessor."""
     if len(graph.edges()) == 0:
         return np.eye(num_clients)
-    
-    try:
-        # Get subgraphs (connected components)
-        subgraphs = list(nx.connected_components(graph))
-        
-        if len(subgraphs) > 1:
-            # Graph is not connected, use simpler method
-            print("Warning: Graph not connected. Using Metropolis-Hastings for MATCHA.")
-            return _metropolis_hastings_weights(graph, num_clients)
-        
-        # Compute Laplacian matrix
-        L = nx.laplacian_matrix(graph).toarray()
-        
-        # Get optimal activation probabilities using CVX
-        edge_probs = _get_optimal_probabilities(graph, L)
-        
-        # Compute mixing weights using SDP
-        W = _get_optimal_alpha(graph, edge_probs, num_clients)
-        
-        return W
-        
-    except Exception as e:
-        print(f"MATCHA optimization failed: {e}. Falling back to Metropolis-Hastings.")
-        return _metropolis_hastings_weights(graph, num_clients)
 
+    cache_key = id(graph)
+    if cache_key in _matcha_cache and cache_key in _matcha_meta_cache:
+        _matcha_log(f"using cached expected W for graph_id={cache_key}", graph)
+        return _matcha_cache[cache_key]
 
-def _get_optimal_probabilities(graph: nx.Graph, L: np.ndarray) -> Dict[Tuple[int, int], float]:
-    """Compute optimal edge activation probabilities for MATCHA.
-    
-    Solves CVX problem to maximize expected spectral gap.
-    """
-    edges = list(graph.edges())
-    n_edges = len(edges)
-    
-    # Create CVX variables
-    p = cp.Variable(n_edges, nonneg=True)
-    
-    # Objective: maximize spectral gap (minimize trace of expected Laplacian)
-    # Expected Laplacian: sum_e p_e * L_e
-    objective = cp.Minimize(cp.sum(p))
-    
-    # Constraints
-    constraints = [
-        p >= 0.1,  # Minimum probability
-        p <= 1.0,  # Maximum probability
-        cp.sum(p) >= 1.0  # At least one edge active in expectation
-    ]
-    
-    # Solve
-    problem = cp.Problem(objective, constraints)
-    try:
-        # Try CVXOPT first, fall back to SCS (bundled with cvxpy)
-        try:
-            problem.solve(solver=cp.CVXOPT, kktsolver=cp.ROBUST_KKTSOLVER)
-        except (cp.error.SolverError, Exception):
-            problem.solve(solver=cp.SCS)
-        
-        if problem.status not in ["optimal", "optimal_inaccurate"]:
-            # If optimization fails, use uniform probabilities
-            return {edge: 1.0 for edge in edges}
-        
-        # Extract probabilities
-        edge_probs = {}
-        for i, edge in enumerate(edges):
-            prob = float(p.value[i]) if p.value is not None else 1.0
-            edge_probs[edge] = min(max(prob, 0.1), 1.0)  # Clamp to [0.1, 1.0]
-            edge_probs[(edge[1], edge[0])] = edge_probs[edge]  # Symmetric
-        
-        return edge_probs
-        
-    except Exception as e:
-        print(f"CVX optimization failed: {e}")
-        return {edge: 1.0 for edge in edges}
+    processor = _get_matcha_processor(graph, num_clients)
+    probs = np.array(processor.probabilities, dtype=float)
+    L_matrices = [np.asarray(L, dtype=float) for L in processor.L_matrices]
+    alpha = float(processor.neighbor_weight)
 
+    # Expected MATCHA matrix: E[W_t] = I - alpha * E[L_t]
+    mean_L = np.zeros((num_clients, num_clients), dtype=float)
+    for i in range(len(L_matrices)):
+        mean_L += probs[i] * L_matrices[i]
 
-def _get_optimal_alpha(
-    graph: nx.Graph,
-    edge_probs: Dict[Tuple[int, int], float],
-    num_clients: int
-) -> np.ndarray:
-    """Compute optimal mixing weights alpha for MATCHA using SDP.
-    
-    Given edge probabilities, find mixing weights that optimize convergence.
-    """
-    W = np.zeros((num_clients, num_clients))
-    
-    # For each node, distribute weight among active neighbors
-    for node in range(num_clients):
-        neighbors = list(graph.neighbors(node))
-        
-        if not neighbors:
-            W[node, node] = 1.0
-            continue
-        
-        # Get expected weights based on probabilities
-        total_prob = 0.0
-        for neighbor in neighbors:
-            prob = edge_probs.get((node, neighbor), 1.0)
-            W[node, neighbor] = prob / (1 + len(neighbors))
-            total_prob += W[node, neighbor]
-        
-        # Self-weight
-        W[node, node] = 1.0 - total_prob
-    
+    W = np.eye(num_clients) - alpha * mean_L
+    W = np.maximum(W, 0.0)
+    row_sums = W.sum(axis=1, keepdims=True)
+    row_sums[row_sums == 0.0] = 1.0
+    W = W / row_sums
+
+    _matcha_cache[cache_key] = W
+    _matcha_meta_cache[cache_key] = {
+        'alpha': alpha,
+        'processor': processor,
+    }
+    _matcha_log(
+        (
+            f"computed expected W: graph_id={cache_key}, subgraphs={len(L_matrices)}, "
+            f"alpha={alpha:.6f}, probs={np.round(probs, 6).tolist()}, "
+            f"row_sums={np.round(W.sum(axis=1), 6).tolist()}"
+        ),
+        graph,
+    )
     return W
+
+
+def _calculate_matcha_iterations(graph: nx.Graph) -> int:
+    """Calculate total communication iterations from gossip schedule and rounds."""
+    rounds = int(graph.graph.get('rounds', 10))
+    gossip_schedule_str = graph.graph.get('gossip_schedule', None)
+    gossip_steps = int(graph.graph.get('gossip_steps', 1))
+    
+    if gossip_schedule_str:
+        # Parse schedule "5:0,3:1,1:2" into list of (steps, from_round) tuples
+        schedule = []
+        for item in gossip_schedule_str.split(','):
+            steps, from_round = map(int, item.split(':'))
+            schedule.append((steps, from_round))
+        
+        # Sort by from_round for correct order
+        schedule.sort(key=lambda x: x[1])
+        
+        # Calculate total iterations across all rounds
+        total_iterations = 0
+        for round_num in range(rounds):
+            # Find which schedule entry applies to this round
+            applicable_steps = gossip_steps  # default fallback
+            for steps, from_round in schedule:
+                if from_round <= round_num:
+                    applicable_steps = steps
+            total_iterations += applicable_steps
+        return total_iterations
+    else:
+        return rounds * gossip_steps
+
+
+def _get_matcha_processor(graph: nx.Graph, num_clients: int):
+    """Create/retrieve the original MATCHA MatchaProcessor from cloned repo."""
+    cache_key = id(graph)
+    cached = _matcha_meta_cache.get(cache_key, {}).get('processor')
+    if cached is not None:
+        _matcha_log(f"using cached processor for graph_id={cache_key}", graph)
+        return cached
+
+    matcha_file = Path(__file__).resolve().parent / 'MATCHA' / 'graph_manager.py'
+    spec = importlib.util.spec_from_file_location('matcha_graph_manager', matcha_file)
+    if spec is None or spec.loader is None:
+        raise ImportError(f'Cannot load MATCHA from {matcha_file}')
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    MatchaProcessor = mod.MatchaProcessor
+
+    comm_budget = float(graph.graph.get('matcha_comm_budget', 1.0))
+    iterations = _calculate_matcha_iterations(graph)  # Based on gossip schedule and rounds
+    processor = MatchaProcessor(
+        base_graph=nx.Graph(graph),
+        commBudget=comm_budget,
+        rank=0,
+        size=num_clients,
+        iterations=iterations,
+        issubgraph=False,
+    )
+    _matcha_log(
+        (
+            f"processor created: graph_id={cache_key}, clients={num_clients}, "
+            f"comm_budget={comm_budget}, iterations={iterations}, "
+            f"subgraphs={len(processor.subGraphs)}, "
+            f"probs={np.round(np.array(processor.probabilities, dtype=float), 6).tolist()}, "
+            f"alpha={float(processor.neighbor_weight):.6f}"
+        ),
+        graph,
+    )
+    _matcha_meta_cache.setdefault(cache_key, {})['processor'] = processor
+    return processor
 
 
 def get_active_edges(
     graph: nx.Graph,
     round_num: int,
-    seed: int = None
+    seed: int = None,
+    method: MixingMethod = 'metropolis_hastings',
+    gossip_step: int = 0
 ) -> Dict[Tuple[int, int], bool]:
     """Determine which edges are active in this round based on probabilities.
     
@@ -402,12 +407,17 @@ def get_active_edges(
         graph: Network topology graph
         round_num: Current round number
         seed: Random seed for reproducibility
+        method: Mixing method; MATCHA uses subgraph-level activation
+        gossip_step: Gossip step index within the current round
         
     Returns:
         Dictionary mapping edges to activation status
     """
     if seed is not None:
-        np.random.seed(seed + round_num)
+        np.random.seed(seed + round_num * 1000 + gossip_step)
+
+    if method == 'matcha':
+        return _get_matcha_active_edges(graph, round_num, gossip_step, seed)
     
     active_edges = {}
     
@@ -417,6 +427,53 @@ def get_active_edges(
         active_edges[edge] = is_active
         active_edges[(edge[1], edge[0])] = is_active  # Undirected
     
+    return active_edges
+
+
+def _get_matcha_active_edges(
+    graph: nx.Graph,
+    round_num: int,
+    gossip_step: int,
+    seed: int = None,
+) -> Dict[Tuple[int, int], bool]:
+    """Sample active edges according to MATCHA subgraph probabilities.
+
+    All edges inside an activated subgraph are activated together.
+    """
+    num_clients = graph.number_of_nodes()
+    processor = _get_matcha_processor(graph, num_clients)
+
+    active_edges: Dict[Tuple[int, int], bool] = {}
+    subgraphs = processor.subGraphs
+    probs = np.array(processor.probabilities, dtype=float)
+
+    for i, edges in enumerate(subgraphs):
+        is_on = np.random.random() < float(probs[i])
+        for (u, v) in edges:
+            active_edges[(u, v)] = is_on
+            active_edges[(v, u)] = is_on
+
+    # If an edge is somehow outside decomposition, keep it always active.
+    for u, v in graph.edges():
+        if (u, v) not in active_edges:
+            active_edges[(u, v)] = True
+            active_edges[(v, u)] = True
+
+    active_undirected = sum(
+        1 for (u, v), on in active_edges.items()
+        if on and u < v
+    )
+    total_undirected = graph.number_of_edges()
+    probs_preview = np.round(probs.astype(float), 4).tolist()
+    _matcha_log(
+        (
+            f"round={round_num}, gossip_step={gossip_step}, "
+            f"active_edges={active_undirected}/{total_undirected}, "
+            f"probabilities={probs_preview}"
+        ),
+        graph,
+    )
+
     return active_edges
 
 
@@ -627,9 +684,9 @@ def _active_matcha(
 ) -> np.ndarray:
     """MATCHA with active edges only.
     
-    Computes the full MATCHA mixing matrix once (cached), then for each
-    round keeps only active edge weights and redistributes inactive
-    weight to self-loops so rows still sum to 1.
+    Computes the full nonnegative MATCHA mixing matrix once (cached), then for
+    each round keeps only currently active edge weights and redistributes the
+    removed weight to self-loops so rows still sum to 1.
     """
     global _matcha_cache
     
@@ -639,8 +696,10 @@ def _active_matcha(
         _matcha_cache[cache_key] = _matcha_weights(graph, num_clients)
     
     W_full = _matcha_cache[cache_key]
-    
-    # Build active mixing matrix: keep MATCHA weights for active edges only
+
+    # Build active mixing matrix from the cached, row-normalized MATCHA weights.
+    # This preserves the nonnegative expected weights from _matcha_weights while
+    # moving any removed inactive-edge mass back to the self-loop.
     W = np.zeros((num_clients, num_clients))
     
     for node in range(num_clients):
@@ -652,6 +711,14 @@ def _active_matcha(
             W[node, neighbor] = W_full[node, neighbor]
         
         # Self-weight absorbs weight from inactive edges
-        W[node, node] = 1.0 - np.sum(W[node, :])
+        W[node, node] = max(1.0 - np.sum(W[node, :]), 0.0)
+
+    _matcha_log(
+        (
+            f"active W built: row_sums={np.round(W.sum(axis=1), 6).tolist()}, "
+            f"diag={np.round(np.diag(W), 6).tolist()}"
+        ),
+        graph,
+    )
     
     return W

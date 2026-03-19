@@ -297,6 +297,9 @@ def run_decentralized(args):
             intra_cluster_communication=args.intra_cluster_communication
         )
         print(f"Graph: {graph.number_of_nodes()} nodes, {graph.number_of_edges()} edges")
+
+    # MATCHA runtime knobs are stored on the graph so topology.py can read them.
+    graph.graph['matcha_comm_budget'] = float(args.matcha_comm_budget)
     
     # Load shared initial weights w_0 so every client starts identically
     w0_path = Path(args.init_weights) if args.init_weights else Path('init_weights') / f'{args.model}_w0.pt'
@@ -458,6 +461,8 @@ def main():
         help='Gossip drop schedule as "steps:from_round" pairs, e.g. "5:0,3:100,1:200" '
              'means 5 gossip steps until round 100, 3 until round 200, then 1. '
              'Overrides --gossip_steps when provided.')
+    parser.add_argument('--matcha_comm_budget', type=float, default=0.5,
+        help='MATCHA communication budget in [0,1]. Lower values activate fewer subgraphs per step.')
     parser.add_argument(
         '--intra_cluster_communication',
         action='store_true',

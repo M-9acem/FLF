@@ -291,11 +291,14 @@ class P2PRunner:
                 total_samples=total_samples
             )
 
-        # Resolve effective gossip steps for this round (schedule or fixed)
+        # Resolve effective gossip steps for this round (schedule or fixed).
+        # Schedule thresholds are expressed in zero-based round indices so
+        # a schedule like 5:0,3:1,1:2 maps to rounds 1,2,3 as 5,3,1 steps.
+        round_index = round_num - 1
         if self.gossip_schedule:
             effective_gossip_steps = self.gossip_schedule[0][1]  # default: first entry
             for from_round, steps in self.gossip_schedule:
-                if round_num >= from_round:
+                if round_index >= from_round:
                     effective_gossip_steps = steps
         else:
             effective_gossip_steps = self.gossip_steps
@@ -310,7 +313,13 @@ class P2PRunner:
         
         for gossip_step in range(effective_gossip_steps):
             # Determine active edges for this round
-            active_edges = get_active_edges(self.graph, round_num, self.seed)
+            active_edges = get_active_edges(
+                self.graph,
+                round_num,
+                self.seed,
+                method=self.mixing_method,
+                gossip_step=gossip_step
+            )
             
             # Create mixing matrix based on active edges and mixing method
             W = get_active_mixing_matrix(

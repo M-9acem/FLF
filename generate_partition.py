@@ -18,6 +18,7 @@ from src.utils import get_dataset, partition_data
 CONFIGS = [
     ('cifar10', './data', 40, 'dirichlet', 0.5, None),
     ('cifar10', './data', 10, 'dirichlet', 0.5, None),
+    ('cifar10', './data',  6, 'dirichlet', 0.5, None),
 ]
 
 OUT_DIR = Path('data_partition')
