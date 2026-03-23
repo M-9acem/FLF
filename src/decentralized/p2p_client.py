@@ -1,12 +1,240 @@
 """P2P client implementation for decentralized federated learning."""
 
 import os
+import tempfile
+from pathlib import Path
+import shutil
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from typing import Dict, Optional
+from typing import Dict, Optional, List, Tuple, Union, Any
 import copy
 import numpy as np
+
+
+def _clone_state_dict(state_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    """Clone tensors so buffered history is never mutated by later updates."""
+    return {k: v.detach().cpu().clone() for k, v in state_dict.items()}
+
+
+class OutdatedAgreementAggregator:
+    """Method 1: Outdated Agreement Feedback with per-node model buffers.
+
+    Update rule:
+        w_i(t+1) = alpha_ii * w_i(t) + sum_{j != i} a_ij * w_j(t-d)
+
+    Notes:
+      - Keeps the last d+1 states for each participant (self + neighbors).
+      - For early rounds (t < d), uses the oldest available buffered state.
+    """
+
+    def __init__(self, local_id: int):
+        self.local_id = local_id
+        # node_id -> list of historical snapshot entries (oldest ... newest)
+        self.state_buffer: Dict[int, List[Dict[str, Any]]] = {}
+        self._step_counter = 0
+
+        # By default, use disk-backed buffering to cap RAM usage for large models.
+        to_disk_env = os.getenv('DELAY_BUFFER_TO_DISK', '1').strip().lower()
+        self.use_disk_buffer = to_disk_env in {'1', 'true', 'yes', 'on'}
+
+        root_env = os.getenv('DELAY_BUFFER_DIR', '').strip()
+        if root_env:
+            root = Path(root_env)
+        else:
+            root = Path(tempfile.gettempdir()) / 'flf_delay_buffer'
+        self._buffer_root = root / f'client_{local_id}'
+        if self.use_disk_buffer:
+            self._buffer_root.mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def _state_scalar(state: Dict[str, torch.Tensor]) -> float:
+        """Return one representative scalar for concise delay debug traces."""
+        first_key = next(iter(state.keys()))
+        flat = state[first_key].detach().float().view(-1)
+        return float(flat[0].item()) if flat.numel() > 0 else 0.0
+
+    def _save_state_to_disk(self, node_id: int, state: Dict[str, torch.Tensor]) -> Dict[str, Any]:
+        node_dir = self._buffer_root / f'node_{node_id}'
+        node_dir.mkdir(parents=True, exist_ok=True)
+        self._step_counter += 1
+        file_path = node_dir / f'step_{self._step_counter:08d}.pt'
+        torch.save(state, file_path)
+        return {
+            'kind': 'disk',
+            'path': str(file_path),
+            'scalar': self._state_scalar(state),
+        }
+
+    def _make_entry(self, node_id: int, state: Dict[str, torch.Tensor]) -> Dict[str, Any]:
+        cloned = _clone_state_dict(state)
+        if self.use_disk_buffer:
+            return self._save_state_to_disk(node_id, cloned)
+        return {
+            'kind': 'ram',
+            'state': cloned,
+            'scalar': self._state_scalar(cloned),
+        }
+
+    @staticmethod
+    def _entry_state(entry: Dict[str, Any]) -> Dict[str, torch.Tensor]:
+        if entry.get('kind') == 'disk':
+            path = entry['path']
+            try:
+                return torch.load(path, map_location='cpu', weights_only=True)
+            except TypeError:
+                return torch.load(path, map_location='cpu')
+        return entry['state']
+
+    @staticmethod
+    def _entry_scalar(entry: Dict[str, Any]) -> float:
+        scalar = entry.get('scalar', None)
+        if scalar is not None:
+            return float(scalar)
+        return 0.0
+
+    @staticmethod
+    def _delete_entry(entry: Dict[str, Any]) -> None:
+        if entry.get('kind') == 'disk':
+            path = entry.get('path', '')
+            if path:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+
+    def _append_state(self, node_id: int, state: Dict[str, torch.Tensor], delay: int) -> None:
+        history = self.state_buffer.setdefault(node_id, [])
+        history.append(self._make_entry(node_id, state))
+        keep = max(delay + 1, 1)
+        if len(history) > keep:
+            stale = history[:-keep]
+            for entry in stale:
+                self._delete_entry(entry)
+            del history[:-keep]
+
+    def _get_delayed_entry(self, node_id: int, delay: int) -> Dict[str, Any]:
+        history = self.state_buffer.get(node_id, [])
+        if not history:
+            raise KeyError(f"No buffered state for node {node_id}")
+        if len(history) > delay:
+            return history[-(delay + 1)]
+        # For t < d, fall back to oldest available (initial buffered state).
+        return history[0]
+
+    def _get_delayed_state(self, node_id: int, delay: int) -> Dict[str, torch.Tensor]:
+        entry = self._get_delayed_entry(node_id, delay)
+        return self._entry_state(entry)
+
+    def cleanup(self) -> None:
+        for history in self.state_buffer.values():
+            for entry in history:
+                self._delete_entry(entry)
+        self.state_buffer.clear()
+        if self.use_disk_buffer:
+            try:
+                shutil.rmtree(self._buffer_root, ignore_errors=True)
+            except OSError:
+                pass
+
+    def aggregate(
+        self,
+        local_model: nn.Module,
+        neighbor_models: Union[Dict[int, Dict[str, torch.Tensor]], List[Tuple[int, Dict[str, torch.Tensor]]]],
+        mixing_weights: Dict[int, float],
+        delay: int,
+        debug: bool = False,
+        round_num: Optional[int] = None,
+        gossip_step: Optional[int] = None,
+        client_id: Optional[int] = None,
+    ) -> Dict[str, torch.Tensor]:
+        """Aggregate with delayed neighbor states and current local state.
+
+        Args:
+            local_model: Current local model.
+            neighbor_models: Neighbor states as {neighbor_id: state_dict}
+                or [(neighbor_id, state_dict), ...].
+            mixing_weights: Mapping j -> W_ij for all contributors (including self).
+            delay: Delay d for selecting state at t-d.
+
+        Returns:
+            Aggregated state_dict for w_i(t+1).
+        """
+        if delay < 0:
+            raise ValueError("delay must be >= 0")
+
+        local_state = _clone_state_dict(local_model.state_dict())
+        self._append_state(self.local_id, local_state, delay)
+
+        if isinstance(neighbor_models, list):
+            neighbor_items = neighbor_models
+        else:
+            neighbor_items = list(neighbor_models.items())
+        neighbor_lookup = dict(neighbor_items)
+
+        for neighbor_id, neighbor_state in neighbor_items:
+            self._append_state(neighbor_id, neighbor_state, delay)
+
+        aggregated_state: Dict[str, torch.Tensor] = {
+            k: torch.zeros_like(v, dtype=torch.float32) for k, v in local_state.items()
+        }
+
+        debug_chunks: List[str] = []
+
+        for node_id, weight in mixing_weights.items():
+            # Method 1 requested by user: self uses current state w_i(t),
+            # neighbors use delayed states w_j(t-d).
+            if node_id == self.local_id:
+                source_state = local_state
+                if debug:
+                    debug_chunks.append(
+                        f"self(node={node_id}):src=current,w={float(weight):.6f},"
+                        f"value={self._state_scalar(source_state):.6f}"
+                    )
+            else:
+                history = self.state_buffer.get(node_id, [])
+                if len(history) > delay:
+                    source_idx = -(delay + 1)
+                    source_label = f"delayed(t-d),idx={source_idx}"
+                    source_entry = history[source_idx]
+                else:
+                    source_label = "oldest_fallback(t<d)"
+                    source_entry = history[0]
+                source_state = self._entry_state(source_entry)
+                if debug:
+                    current_neighbor = _clone_state_dict(neighbor_lookup[node_id])
+                    debug_chunks.append(
+                        f"nbr(node={node_id}):src={source_label},w={float(weight):.6f},"
+                        f"used={self._entry_scalar(source_entry):.6f},"
+                        f"current={self._state_scalar(current_neighbor):.6f},"
+                        f"hist_len={len(history)}"
+                    )
+            for key in aggregated_state.keys():
+                aggregated_state[key] += source_state[key].float() * float(weight)
+
+        if debug and debug_chunks:
+            rid = round_num if round_num is not None else -1
+            gid = gossip_step if gossip_step is not None else -1
+            cid = client_id if client_id is not None else self.local_id
+            line = (
+                "[DELAY_DEBUG] "
+                f"round={rid},gossip_step={gid},client={cid},d={delay} | "
+                + " ; ".join(debug_chunks)
+            )
+            print(line)
+            debug_file = os.getenv('DELAY_DEBUG_FILE', '').strip()
+            if debug_file:
+                try:
+                    with open(debug_file, 'a', encoding='utf-8') as f:
+                        f.write(line + "\n")
+                except OSError:
+                    pass
+
+        # Cast back to local model dtypes to keep buffers/BN trackers valid.
+        return {
+            k: aggregated_state[k].to(dtype=local_state[k].dtype)
+            for k in aggregated_state.keys()
+        }
 
 
 class P2PClient:
@@ -46,6 +274,8 @@ class P2PClient:
         
         # Store neighbor models for gossip
         self.neighbor_models: Dict[int, Dict[str, torch.Tensor]] = {}
+        # Buffered delayed aggregator (Method 1 from "Fast model averaging via buffered states").
+        self.outdated_feedback = OutdatedAgreementAggregator(local_id=client_id)
     
     def get_state(self) -> Dict[str, torch.Tensor]:
         """Get current model state.
@@ -217,6 +447,49 @@ class P2PClient:
         })
         
         return weight_diff
+
+    def gossip_aggregate_with_delay(
+        self,
+        weights: Dict[int, float],
+        delay: int,
+        round_num: Optional[int] = None,
+        gossip_step: Optional[int] = None,
+    ) -> float:
+        """Aggregate model with delayed states w_j(t-d) using buffered history.
+
+        Args:
+            weights: Dictionary mapping node IDs to mixing weights W_ij.
+            delay: Delay d in rounds/steps for outdated agreement feedback.
+
+        Returns:
+            weight_diff: L2 norm between pre/post aggregation parameter vectors.
+        """
+        if delay < 0:
+            raise ValueError("delay must be >= 0")
+
+        current_state = self.get_state()
+        pre_vec = torch.cat([v.flatten().float() for v in current_state.values()])
+
+        aggregated_state = self.outdated_feedback.aggregate(
+            local_model=self.model,
+            neighbor_models=self.neighbor_models,
+            mixing_weights=weights,
+            delay=delay,
+            debug=os.getenv('DELAY_DEBUG', '').strip().lower() in {'1', 'true', 'yes', 'on'},
+            round_num=round_num,
+            gossip_step=gossip_step,
+            client_id=self.client_id,
+        )
+
+        post_vec = torch.cat([v.flatten().float() for v in aggregated_state.values()])
+        weight_diff = (post_vec - pre_vec).norm(2).item()
+
+        self.set_state({k: v.to(device=self.device) for k, v in aggregated_state.items()})
+        return weight_diff
+
+    def close(self) -> None:
+        """Release delayed-buffer resources (disk snapshots and in-memory index)."""
+        self.outdated_feedback.cleanup()
     
     def evaluate(self, compute_per_class_metrics: bool = False) -> Dict[str, any]:
         """Evaluate the model on test data.

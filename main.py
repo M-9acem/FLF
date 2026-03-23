@@ -347,15 +347,19 @@ def run_decentralized(args):
         seed=args.seed,
         mixing_method=args.mixing_method,
         gossip_steps=args.gossip_steps,
-        gossip_schedule=gossip_schedule
+        gossip_schedule=gossip_schedule,
+        delay_d=args.delay_d
     )
     
     # Save network topology visualization
     print("\nGenerating network topology visualization...")
-    runner.save_topology_visualization(
-        output_dir=logger.get_log_dir(),
-        experiment_name="network_topology"
-    )
+    try:
+        runner.save_topology_visualization(
+            output_dir=logger.get_log_dir(),
+            experiment_name="network_topology"
+        )
+    except Exception as e:
+        print(f"Warning: topology visualization skipped ({e})")
     
     # Train
     if args.gossip_steps > 1:
@@ -458,6 +462,9 @@ def main():
         help='Gossip drop schedule as "steps:from_round" pairs, e.g. "5:0,3:100,1:200" '
              'means 5 gossip steps until round 100, 3 until round 200, then 1. '
              'Overrides --gossip_steps when provided.')
+    parser.add_argument('--delay_d', type=int, default=0,
+        help='Delayed aggregation depth d. If >0, uses current self and delayed neighbors: '
+             'w_i(t+1)=alpha_ii*w_i(t)+sum_{j!=i}a_ij*w_j(t-d).')
     parser.add_argument(
         '--intra_cluster_communication',
         action='store_true',

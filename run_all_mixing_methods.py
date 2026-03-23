@@ -29,6 +29,7 @@ DEFAULTS = dict(
     epochs            = 2,
     gossip_steps      = 1,
     gossip_schedule   = None,   # e.g. "5:0,3:100,1:200" — overrides gossip_steps
+    delay_d           = 0,      # delayed aggregation depth d
     dataset           = "cifar10",
     model             = "resnet8",
     main_link_prob    = 1.0,
@@ -121,6 +122,7 @@ def run_experiment(cfg: dict) -> list:
     model         = cfg["model"]
     gossip_sched  = cfg.get("gossip_schedule")
     gossip_steps  = cfg.get("gossip_steps", 1)
+    delay_d       = int(cfg.get("delay_d", 0))
 
     gossip_desc = f"schedule {gossip_sched}" if gossip_sched else f"{gossip_steps} gossip steps/round"
 
@@ -128,6 +130,7 @@ def run_experiment(cfg: dict) -> list:
     print(f"EXPERIMENT: {exp_name}")
     print("="*70)
     print(f"  clients={n_clients}, rounds={rounds}, epochs={epochs}, {gossip_desc}")
+    print(f"  delay_d={delay_d}")
     print(f"  dataset={dataset}, model={model}")
 
     topology_path  = resolve_topology(cfg)
@@ -162,6 +165,7 @@ def run_experiment(cfg: dict) -> list:
             "--num_clients",     str(n_clients),
             "--rounds",          str(rounds),
             "--epochs",          str(epochs),
+            "--delay_d",         str(delay_d),
             "--dataset",         dataset,
             "--model",           model,
             "--experiment_name", full_exp_name,

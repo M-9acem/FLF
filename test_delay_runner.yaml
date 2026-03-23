@@ -1,0 +1,9 @@
+experiments:
+  - name: smoke_delay_runner
+    num_clients: 6
+    rounds: 1
+    epochs: 1
+    delay_d: 3
+    dataset: cifar10
+    model: lenet5
+    methods: [jaccard]

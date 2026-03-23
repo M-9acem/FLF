@@ -27,6 +27,7 @@ experiments:
     num_clients: 40
     rounds: 400
     epochs: 2
+    delay_d: 5
     gossip_steps: 9
     dataset: cifar10
     model: resnet8
@@ -37,6 +38,7 @@ experiments:
     num_clients: 40
     rounds: 400
     epochs: 2
+    delay_d: 5
     gossip_steps: 10 
     dataset: cifar10
     model: resnet8
@@ -46,6 +48,7 @@ experiments:
     num_clients: 40
     rounds: 400
     epochs: 2
+    delay_d: 5
     gossip_steps: 15
     dataset: cifar10
     model: resnet8
@@ -56,6 +59,7 @@ experiments:
     num_clients: 40
     rounds: 400
     epochs: 2
+    delay_d: 5
     gossip_steps: 20
     dataset: cifar10
     model: resnet8
@@ -65,6 +69,7 @@ experiments:
     num_clients: 40
     rounds: 400
     epochs: 2
+    delay_d: 5
     gossip_steps: 21
     dataset: cifar10
     model: resnet8

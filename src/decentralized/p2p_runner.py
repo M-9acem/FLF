@@ -29,7 +29,8 @@ class P2PRunner:
         seed: int = 42,
         mixing_method: MixingMethod = 'metropolis_hastings',
         gossip_steps: int = 1,
-        gossip_schedule: List[tuple] = None
+        gossip_schedule: List[tuple] = None,
+        delay_d: int = 0
     ):
         """Initialize P2P runner.
         
@@ -44,6 +45,8 @@ class P2PRunner:
                 gossip drop schedule, e.g. [(0,5),(100,3),(200,1)] means 5 steps
                 until round 100, 3 until round 200, then 1 for remaining rounds.
                 Overrides gossip_steps when provided.
+            delay_d: Delayed aggregation depth d. If d>0, use
+                w_i(t+1)=alpha_ii*w_i(t)+sum_{j!=i} a_ij*w_j(t-d).
         """
         self.clients = clients
         self.graph = graph
@@ -51,6 +54,7 @@ class P2PRunner:
         self.seed = seed
         self.mixing_method = mixing_method
         self.gossip_steps = gossip_steps
+        self.delay_d = max(0, int(delay_d))
         # Sort schedule by from_round ascending
         self.gossip_schedule = sorted(gossip_schedule, key=lambda x: x[0]) if gossip_schedule else None
         self.num_clients = len(clients)
@@ -63,6 +67,17 @@ class P2PRunner:
             print(f"P2P Runner initialized with mixing method: {mixing_method}, gossip schedule: [{schedule_str}]")
         else:
             print(f"P2P Runner initialized with mixing method: {mixing_method}, gossip_steps: {gossip_steps}")
+        if self.delay_d > 0:
+            print(f"Delayed aggregation enabled: d={self.delay_d}")
+            if self.logger is not None:
+                delay_buffer_dir = os.path.join(self.logger.get_log_dir(), 'delay_buffer')
+                os.environ['DELAY_BUFFER_DIR'] = delay_buffer_dir
+                print(f"Delay buffer directory: {delay_buffer_dir}")
+            delay_dbg = os.getenv('DELAY_DEBUG', '').strip().lower() in {'1', 'true', 'yes', 'on'}
+            if delay_dbg and self.logger is not None:
+                delay_log = os.path.join(self.logger.get_log_dir(), 'delay_debug.log')
+                os.environ['DELAY_DEBUG_FILE'] = delay_log
+                print(f"Delay debug log file: {delay_log}")
     
     def save_topology_visualization(self, output_dir: str, experiment_name: str = "p2p_topology"):
         """Save network topology as interactive HTML.
@@ -344,8 +359,16 @@ class P2PRunner:
                 for neighbor_id in range(self.num_clients):
                     if W[client.client_id, neighbor_id] > 0:
                         weights[neighbor_id] = W[client.client_id, neighbor_id]
-                
-                step_weight_diff = client.gossip_aggregate(weights)
+
+                if self.delay_d > 0:
+                    step_weight_diff = client.gossip_aggregate_with_delay(
+                        weights,
+                        self.delay_d,
+                        round_num=round_num,
+                        gossip_step=gossip_step,
+                    )
+                else:
+                    step_weight_diff = client.gossip_aggregate(weights)
                 weight_diffs[client.client_id] += step_weight_diff
         
         communication_time = time.time() - communication_start
@@ -405,6 +428,11 @@ class P2PRunner:
             self.train_round(round_num, local_epochs)
         
         print("\n=== Training Complete ===")
+
+        # Release delayed-buffer files after training to avoid disk buildup.
+        if self.delay_d > 0:
+            for client in self.clients:
+                client.close()
         
         # Save final client weights for comparison
         if self.logger:
