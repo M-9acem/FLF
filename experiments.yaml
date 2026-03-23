@@ -22,22 +22,50 @@
 
 experiments:
 
-  # ── All methods, N=40, fixed 3 gossip steps/round ─────────────────────────
-  - name: N40_gossip3
+  # ── Max Degree + Jaccard Similarity only, N=40, fixed gossip steps/round ──
+  - name: N40_gossip9
     num_clients: 40
-    rounds: 200
+    rounds: 400
     epochs: 2
-    gossip_steps: 3
+    gossip_steps: 9
     dataset: cifar10
     model: resnet8
-    # methods not specified → runs all 5
+    methods: [max_degree, jaccard]
 
-  # ── All methods, N=40, decreasing gossip schedule ─────────────────────────
-  - name: N40_gossip_schedule
+  # ── Max Degree + Jaccard Similarity only, N=40
+  - name: N40_gossip10
     num_clients: 40
-    rounds: 200
+    rounds: 400
     epochs: 2
-    gossip_schedule: "5:0,3:67,1:134"   # 5 steps rounds 0-66, 3 steps 67-133, 1 step 134-199
+    gossip_steps: 10 
     dataset: cifar10
     model: resnet8
-    # methods not specified → runs all 5
+    methods: [max_degree, jaccard]
+
+  - name: N40_gossip15
+    num_clients: 40
+    rounds: 400
+    epochs: 2
+    gossip_steps: 15
+    dataset: cifar10
+    model: resnet8
+    methods: [max_degree, jaccard]
+
+
+  - name: N40_gossip20
+    num_clients: 40
+    rounds: 400
+    epochs: 2
+    gossip_steps: 20
+    dataset: cifar10
+    model: resnet8
+    methods: [max_degree, jaccard]
+
+  - name: N40_gossip21
+    num_clients: 40
+    rounds: 400
+    epochs: 2
+    gossip_steps: 21
+    dataset: cifar10
+    model: resnet8
+    methods: [max_degree, jaccard]
