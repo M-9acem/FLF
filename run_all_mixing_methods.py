@@ -57,23 +57,45 @@ def resolve_topology(cfg: dict) -> Path:
         path = Path(cfg["topology_file"])
         print(f"  topology : {path} (specified)")
         return path
+
+    requested_n = int(cfg["num_clients"])
     exp_name = cfg.get("name", "default")
     path = Path(f"shared_topology_{exp_name}.pkl")
-    if path.exists():
-        print(f"  topology : {path} (cached)")
-    else:
-        print(f"  topology : {path} (generating ...)")
+
+    def _generate(path_obj: Path):
+        print(f"  topology : {path_obj} (generating ...)")
         from src.decentralized.topology import create_two_cluster_topology
-        graph = create_two_cluster_topology(
-            num_clients           = cfg["num_clients"],
-            main_link_prob        = cfg["main_link_prob"],
-            border_link_prob      = cfg["border_link_prob"],
-            intra_cluster_prob    = cfg["intra_cluster_prob"],
-            intra_cluster_communication = False,
+        graph_obj = create_two_cluster_topology(
+            num_clients=requested_n,
+            main_link_prob=cfg["main_link_prob"],
+            border_link_prob=cfg["border_link_prob"],
+            intra_cluster_prob=cfg["intra_cluster_prob"],
+            intra_cluster_communication=False,
         )
-        with open(path, "wb") as f:
-            pickle.dump(graph, f)
-        print(f"    saved to {path}")
+        with open(path_obj, "wb") as f:
+            pickle.dump(graph_obj, f)
+        print(f"    saved to {path_obj}")
+
+    if path.exists():
+        try:
+            with open(path, "rb") as f:
+                cached_graph = pickle.load(f)
+            cached_nodes = set(cached_graph.nodes())
+            expected_nodes = set(range(requested_n))
+            if cached_nodes == expected_nodes:
+                print(f"  topology : {path} (cached)")
+                return path
+            print(
+                f"  topology : {path} (cached mismatch: {len(cached_nodes)} nodes, expected {requested_n})"
+            )
+            print("             regenerating to match requested client count ...")
+            _generate(path)
+        except Exception as e:
+            print(f"  topology : {path} (cached read failed: {e})")
+            print("             regenerating ...")
+            _generate(path)
+    else:
+        _generate(path)
     return path
 
 
@@ -95,16 +117,34 @@ def resolve_partition(cfg: dict) -> Path:
         path = Path(cfg["partition_file"])
         print(f"  partition: {path} (specified)")
         return path
-    n  = cfg["num_clients"]
+    n = cfg["num_clients"]
     ds = cfg["dataset"]
-    path = Path("data_partition") / f"{ds}_N{n}_dirichlet_a0.5.pkl"
+    partition_type = cfg.get("partition", "dirichlet")
+    alpha = float(cfg.get("alpha", 0.5))
+    classes_per_client = int(cfg.get("classes_per_client", 2))
+
+    if partition_type == "pathological":
+        fname = f"{ds}_N{n}_pathological_c{classes_per_client}.pkl"
+    else:
+        fname = f"{ds}_N{n}_{partition_type}_a{alpha}.pkl"
+
+    path = Path("data_partition") / fname
     if not path.exists():
-        print(f"  partition: {path} not found — running generate_partition.py ...")
-        subprocess.run([sys.executable, "generate_partition.py"], check=True)
+        print(f"  partition: {path} not found — generating requested partition ...")
+        cmd = [
+            sys.executable,
+            "generate_partition.py",
+            "--dataset", ds,
+            "--num_clients", str(n),
+            "--partition", partition_type,
+            "--alpha", str(alpha),
+            "--classes_per_client", str(classes_per_client),
+        ]
+        subprocess.run(cmd, check=True)
         if not path.exists():
             raise FileNotFoundError(
                 f"generate_partition.py ran but {path} was not created.\n"
-                f"Check that CONFIGS in generate_partition.py includes N={n}."
+                f"Check generate_partition.py arguments and dataset availability."
             )
     print(f"  partition: {path}")
     return path

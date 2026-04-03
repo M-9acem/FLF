@@ -1,5 +1,5 @@
 #!/bin/bash -l
-#SBATCH --job-name=fl_full_comparison
+#SBATCH --job-name=fl_delay_runner
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=10
 #SBATCH --partition=gpu
@@ -37,18 +37,18 @@ echo ""
 echo "Installing/updating requirements..."
 pip install -r requirements.txt || echo "Warning: requirements.txt not found or install failed"
 
-# ─── run full comparison ──────────────────────────────────────
+# ─── run delay-runner experiment ──────────────────────────────
 echo ""
 echo "=========================================="
-echo "Starting Full Comparison Experiment"
+echo "Starting Delay Runner Experiment"
 echo "=========================================="
 echo "This will run:"
-echo "  1. Decentralized (P2P) - All mixing methods"
-echo "  2. Centralized (FedAvg) - 40 clients, 400 rounds, 4 epochs"
+echo "  1. Decentralized (P2P) - Requested mixing methods from YAML"
+echo "  2. Config loaded from experiments_delay_runner.yaml"
 echo "=========================================="
 echo ""
 
-python3 -u run_full_comparison.py
+python3 -u run_all_mixing_methods.py --experiments_yaml experiments_delay_runner.yaml
 
 conda deactivate
 echo ""

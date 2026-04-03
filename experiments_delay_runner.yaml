@@ -1,5 +1,5 @@
 experiments:
-  - name: smoke_delay_runner
+  - name: delay_runner
     num_clients: 6
     rounds: 10
     epochs: 1
