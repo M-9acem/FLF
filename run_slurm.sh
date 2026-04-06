@@ -21,6 +21,23 @@ cd "$ROOT_DIR"
 VENV_PATH="${VENV_PATH:-$ROOT_DIR/venv}"
 YAML_GLOB="${YAML_GLOB:-config/hparam_sweeps/single/*.yaml}"
 
+resolve_path() {
+    local candidate="$1"
+    if [[ -f "$candidate" ]]; then
+        printf '%s\n' "$candidate"
+        return 0
+    fi
+    if [[ -n "${SLURM_SUBMIT_DIR:-}" && -f "$SLURM_SUBMIT_DIR/$candidate" ]]; then
+        printf '%s\n' "$SLURM_SUBMIT_DIR/$candidate"
+        return 0
+    fi
+    if [[ -f "$ROOT_DIR/$candidate" ]]; then
+        printf '%s\n' "$ROOT_DIR/$candidate"
+        return 0
+    fi
+    return 1
+}
+
 if [[ -z "${SLURM_JOB_ID:-}" ]]; then
     echo "Launcher mode: submitting one job per experiment YAML"
     shopt -s nullglob
@@ -34,10 +51,15 @@ if [[ -z "${SLURM_JOB_ID:-}" ]]; then
 
     for yaml in "${yaml_files[@]}"; do
         exp_name="$(basename "$yaml" .yaml)"
+        abs_yaml="$(resolve_path "$yaml")"
+        if [[ -z "$abs_yaml" ]]; then
+            echo "Could not resolve YAML path: $yaml"
+            exit 1
+        fi
         echo "Submitting: $yaml"
         sbatch \
             --job-name="fl_${exp_name}" \
-            --export=ALL,EXP_YAML="$yaml",VENV_PATH="$VENV_PATH" \
+            --export=ALL,EXP_YAML="$abs_yaml",VENV_PATH="$VENV_PATH" \
             "$0"
     done
 
@@ -52,8 +74,9 @@ if [[ -z "${EXP_YAML:-}" ]]; then
     exit 1
 fi
 
-if [[ ! -f "$EXP_YAML" ]]; then
-    echo "YAML file not found: $EXP_YAML"
+EXP_YAML="$(resolve_path "$EXP_YAML" || true)"
+if [[ -z "$EXP_YAML" ]]; then
+    echo "YAML file not found: ${EXP_YAML:-<unset>}"
     exit 1
 fi
 
