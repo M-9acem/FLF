@@ -95,7 +95,7 @@ echo "Experiment YAML: $EXP_YAML"
 
 echo ""
 echo "Installing/updating requirements..."
-python -m pip install -r "$ROOT_DIR/requirements.txt"
+python -m pip install -r requirements.txt
 
 echo ""
 nvidia-smi || true
