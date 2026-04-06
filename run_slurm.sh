@@ -91,6 +91,12 @@ source "$VENV_PATH/bin/activate"
 echo "Job started on $(hostname) at $(date)"
 echo "SLURM_JOB_ID: $SLURM_JOB_ID"
 echo "Experiment YAML: $EXP_YAML"
+
+echo ""
+echo "Installing/updating requirements..."
+python -m pip install -r requirements.txt
+
+echo ""
 nvidia-smi || true
 
 python -u -c "
@@ -101,10 +107,6 @@ print('cuda devices ', torch.cuda.device_count())
 if torch.cuda.is_available():
     print('gpu name     ', torch.cuda.get_device_name(0))
 "
-
-echo ""
-echo "Installing/updating requirements..."
-python -m pip install -r requirements.txt
 
 echo ""
 echo "Running experiment from: $EXP_YAML"
