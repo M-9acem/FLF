@@ -59,7 +59,7 @@ if [[ -z "${SLURM_JOB_ID:-}" ]]; then
         echo "Submitting: $yaml"
         sbatch \
             --job-name="fl_${exp_name}" \
-            --export=ALL,EXP_YAML="$abs_yaml",VENV_PATH="$VENV_PATH",ROOT_DIR="$ROOT_DIR" \
+            --export=ALL,EXP_YAML="$abs_yaml",VENV_PATH="$VENV_PATH" \
             "$0"
     done
 
@@ -74,10 +74,9 @@ if [[ -z "${EXP_YAML:-}" ]]; then
     exit 1
 fi
 
-# Use provided ROOT_DIR or fall back to SLURM_SUBMIT_DIR
-if [[ -z "${ROOT_DIR:-}" ]]; then
-    ROOT_DIR="${SLURM_SUBMIT_DIR:-.}"
-fi
+# Determine the project root from script location
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="${SCRIPT_DIR}"
 cd "$ROOT_DIR"
 
 EXP_YAML="$(resolve_path "$EXP_YAML" || true)"
@@ -100,7 +99,7 @@ echo "Experiment YAML: $EXP_YAML"
 
 echo ""
 echo "Installing/updating requirements..."
-python -m pip install -r requirements.txt
+python -m pip install -r "$ROOT_DIR/requirements.txt"
 
 echo ""
 nvidia-smi || true
