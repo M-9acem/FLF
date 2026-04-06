@@ -86,6 +86,7 @@ if [[ ! -x "$VENV_PATH/bin/python" ]]; then
     exit 1
 fi
 
+cd "$ROOT_DIR"
 source "$VENV_PATH/bin/activate"
 
 echo "Job started on $(hostname) at $(date)"
@@ -94,7 +95,7 @@ echo "Experiment YAML: $EXP_YAML"
 
 echo ""
 echo "Installing/updating requirements..."
-python -m pip install -r requirements.txt
+python -m pip install -r "$ROOT_DIR/requirements.txt"
 
 echo ""
 nvidia-smi || true
