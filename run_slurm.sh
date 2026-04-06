@@ -59,7 +59,7 @@ if [[ -z "${SLURM_JOB_ID:-}" ]]; then
         echo "Submitting: $yaml"
         sbatch \
             --job-name="fl_${exp_name}" \
-            --export=ALL,EXP_YAML="$abs_yaml",VENV_PATH="$VENV_PATH" \
+            --export=ALL,EXP_YAML="$abs_yaml",VENV_PATH="$VENV_PATH",ROOT_DIR="$ROOT_DIR" \
             "$0"
     done
 
@@ -74,6 +74,12 @@ if [[ -z "${EXP_YAML:-}" ]]; then
     exit 1
 fi
 
+# Use provided ROOT_DIR or fall back to SLURM_SUBMIT_DIR
+if [[ -z "${ROOT_DIR:-}" ]]; then
+    ROOT_DIR="${SLURM_SUBMIT_DIR:-.}"
+fi
+cd "$ROOT_DIR"
+
 EXP_YAML="$(resolve_path "$EXP_YAML" || true)"
 if [[ -z "$EXP_YAML" ]]; then
     echo "YAML file not found: ${EXP_YAML:-<unset>}"
@@ -86,7 +92,6 @@ if [[ ! -x "$VENV_PATH/bin/python" ]]; then
     exit 1
 fi
 
-cd "$ROOT_DIR"
 source "$VENV_PATH/bin/activate"
 
 echo "Job started on $(hostname) at $(date)"
