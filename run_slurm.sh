@@ -1,5 +1,5 @@
 #!/bin/bash -l
-#SBATCH --job-name=fl_delay_runner
+#SBATCH --job-name=fl_hparam
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=10
 #SBATCH --partition=gpu
@@ -8,21 +8,68 @@
 #SBATCH --time=72:00:00
 #SBATCH --signal=B:TERM@600
 
-# ─── setup ────────────────────────────────────────────────────
-cd "$SLURM_SUBMIT_DIR" || { echo "Failed to cd to $SLURM_SUBMIT_DIR"; exit 1; }
-mkdir -p logs
-
-# Initialize conda (works in non-interactive shells)
-if [ -f "$HOME/.bashrc" ]; then
-    source "$HOME/.bashrc"
-fi
 eval "$(conda shell.bash hook 2>/dev/null)" || true
+set -euo pipefail
 
-conda activate my_fatfl_env || { echo "Failed to activate conda env"; exit 1; }
+# This script has two modes:
+# 1) Launcher mode (no SLURM_JOB_ID): submit one job per YAML experiment file.
+# 2) Worker mode   (with SLURM_JOB_ID): run one experiment YAML in this allocation.
 
-# ─── diagnostics ──────────────────────────────────────────────
+ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$ROOT_DIR"
+
+VENV_PATH="${VENV_PATH:-$ROOT_DIR/venv}"
+YAML_GLOB="${YAML_GLOB:-config/hparam_sweeps/single/*.yaml}"
+
+if [[ -z "${SLURM_JOB_ID:-}" ]]; then
+    echo "Launcher mode: submitting one job per experiment YAML"
+    shopt -s nullglob
+    yaml_files=( $YAML_GLOB )
+    shopt -u nullglob
+
+    if [[ ${#yaml_files[@]} -eq 0 ]]; then
+        echo "No YAML files matched: $YAML_GLOB"
+        exit 1
+    fi
+
+    for yaml in "${yaml_files[@]}"; do
+        exp_name="$(basename "$yaml" .yaml)"
+        echo "Submitting: $yaml"
+        sbatch \
+            --job-name="fl_${exp_name}" \
+            --export=ALL,EXP_YAML="$yaml",VENV_PATH="$VENV_PATH" \
+            "$0"
+    done
+
+    echo "Submitted ${#yaml_files[@]} jobs."
+    exit 0
+fi
+
+# Worker mode
+if [[ -z "${EXP_YAML:-}" ]]; then
+    echo "EXP_YAML is not set."
+    echo "Submit with: sbatch --export=ALL,EXP_YAML=config/hparam_sweeps/single/<file>.yaml run_slurm.sh"
+    exit 1
+fi
+
+if [[ ! -f "$EXP_YAML" ]]; then
+    echo "YAML file not found: $EXP_YAML"
+    exit 1
+fi
+
+if [[ ! -x "$VENV_PATH/bin/python" ]]; then
+    echo "Python venv not found at: $VENV_PATH"
+    echo "Set VENV_PATH=/path/to/venv when launching."
+    exit 1
+fi
+
+source "$VENV_PATH/bin/activate"
+
 echo "Job started on $(hostname) at $(date)"
+echo "SLURM_JOB_ID: $SLURM_JOB_ID"
+echo "Experiment YAML: $EXP_YAML"
 nvidia-smi || true
+
 python -u -c "
 import torch
 print('torch        ', torch.__version__)
@@ -32,24 +79,13 @@ if torch.cuda.is_available():
     print('gpu name     ', torch.cuda.get_device_name(0))
 "
 
-# ─── install requirements ─────────────────────────────────────
 echo ""
 echo "Installing/updating requirements..."
-pip install -r requirements.txt || echo "Warning: requirements.txt not found or install failed"
+python -m pip install -r requirements.txt
 
-# ─── run delay-runner experiment ──────────────────────────────
 echo ""
-echo "=========================================="
-echo "Starting Delay Runner Experiment"
-echo "=========================================="
-echo "This will run:"
-echo "  1. Decentralized (P2P) - Requested mixing methods from YAML"
-echo "  2. Config loaded from experiments_delay_runner.yaml"
-echo "=========================================="
-echo ""
+echo "Running experiment from: $EXP_YAML"
+python -u run_all_mixing_methods.py --experiments_yaml "$EXP_YAML"
 
-python3 -u run_all_mixing_methods.py --experiments_yaml experiments_delay_runner.yaml
-
-conda deactivate
 echo ""
 echo "Job finished at $(date)"

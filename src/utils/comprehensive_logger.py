@@ -8,6 +8,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from pathlib import Path
 import numpy as np
 import torch
+import matplotlib.pyplot as plt
 
 
 class ComprehensiveLogger:
@@ -846,6 +847,78 @@ class ComprehensiveLogger:
                     metrics.get('recall', 0.0),
                     metrics.get('f1_score', 0.0)
                 ])
+
+    def log_p2p_pair_weight_diffs(
+        self,
+        round_num: int,
+        metric_values: Dict[str, float],
+        metric_pairs: Dict[str, Tuple[int, int]]
+    ):
+        """Log named pairwise post-gossip weight differences for one round.
+
+        Args:
+            round_num: Current round number
+            metric_values: Mapping metric name -> L2 difference value
+            metric_pairs: Mapping metric name -> (node_i, node_j)
+        """
+        csv_file = self.exp_dir / "p2p_pair_weight_diffs.csv"
+        if not csv_file.exists():
+            with open(csv_file, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    'round', 'metric_name', 'node_i', 'node_j', 'weight_diff_l2'
+                ])
+
+        with open(csv_file, 'a', newline='') as f:
+            writer = csv.writer(f)
+            for metric_name, value in metric_values.items():
+                node_i, node_j = metric_pairs[metric_name]
+                writer.writerow([
+                    round_num,
+                    metric_name,
+                    int(node_i),
+                    int(node_j),
+                    float(value)
+                ])
+
+    def plot_p2p_pair_weight_diffs(self):
+        """Plot all named pairwise post-gossip weight-diff metrics across rounds."""
+        csv_file = self.exp_dir / "p2p_pair_weight_diffs.csv"
+        if not csv_file.exists():
+            return
+
+        rows = []
+        with open(csv_file, 'r', newline='') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    rows.append({
+                        'round': int(row['round']),
+                        'metric_name': row['metric_name'],
+                        'value': float(row['weight_diff_l2'])
+                    })
+                except (KeyError, TypeError, ValueError):
+                    continue
+
+        if not rows:
+            return
+
+        metric_names = sorted({r['metric_name'] for r in rows})
+        plt.figure(figsize=(10, 6))
+        for name in metric_names:
+            pts = sorted((r for r in rows if r['metric_name'] == name), key=lambda x: x['round'])
+            x = [p['round'] for p in pts]
+            y = [p['value'] for p in pts]
+            plt.plot(x, y, marker='o', linewidth=1.8, label=name)
+
+        plt.xlabel('Round')
+        plt.ylabel('Weight Difference (L2)')
+        plt.title('Post-Gossip Pairwise Weight Differences by Metric')
+        plt.grid(True, alpha=0.3)
+        plt.legend(loc='best', fontsize=8)
+        plt.tight_layout()
+        plt.savefig(self.plots_dir / 'p2p_pair_weight_diffs.png', dpi=150)
+        plt.close()
     
     # ===================================================================
     # SIMPLIFIED CENTRALIZED LOGGING METHODS

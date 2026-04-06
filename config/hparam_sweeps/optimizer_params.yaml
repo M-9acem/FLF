@@ -1,0 +1,100 @@
+# Sweep: momentum + weight decay (with fixed learning rate)
+# Run:
+#   /home/skacem/Desktop/FLF/venv/bin/python run_all_mixing_methods.py --experiments_yaml config/hparam_sweeps/optimizer_params.yaml
+
+experiments:
+  - name: hp_opt_m08_wd0
+    num_clients: 40
+    rounds: 200
+    epochs: 2
+    lr: 0.01
+    momentum: 0.8
+    weight_decay: 0.0
+    batch_size: 32
+    dataset: cifar10
+    model: resnet8
+    methods: [max_degree, jaccard, metropolis_hastings]
+
+  - name: hp_opt_m09_wd0
+    num_clients: 40
+    rounds: 200
+    epochs: 2
+    lr: 0.01
+    momentum: 0.9
+    weight_decay: 0.0
+    batch_size: 32
+    dataset: cifar10
+    model: resnet8
+    methods: [max_degree, jaccard, metropolis_hastings]
+
+  - name: hp_opt_m09_wd1e4
+    num_clients: 40
+    rounds: 200
+    epochs: 2
+    lr: 0.01
+    momentum: 0.9
+    weight_decay: 0.0001
+    batch_size: 32
+    dataset: cifar10
+    model: resnet8
+    methods: [max_degree, jaccard, metropolis_hastings]
+
+  - name: hp_opt_m095_wd5e4
+    num_clients: 40
+    rounds: 200
+    epochs: 2
+    lr: 0.01
+    momentum: 0.95
+    weight_decay: 0.0005
+    batch_size: 32
+    dataset: cifar10
+    model: resnet8
+    methods: [max_degree, jaccard, metropolis_hastings]
+
+  - name: hp_opt_m08_wd0_e3
+    num_clients: 40
+    rounds: 200
+    epochs: 3
+    lr: 0.01
+    momentum: 0.8
+    weight_decay: 0.0
+    batch_size: 32
+    dataset: cifar10
+    model: resnet8
+    methods: [max_degree, jaccard, metropolis_hastings]
+
+  - name: hp_opt_m09_wd0_e3
+    num_clients: 40
+    rounds: 200
+    epochs: 3
+    lr: 0.01
+    momentum: 0.9
+    weight_decay: 0.0
+    batch_size: 32
+    dataset: cifar10
+    model: resnet8
+    methods: [max_degree, jaccard, metropolis_hastings]
+
+  - name: hp_opt_m09_wd1e4_e3
+    num_clients: 40
+    rounds: 200
+    epochs: 3
+    lr: 0.01
+    momentum: 0.9
+    weight_decay: 0.0001
+    batch_size: 32
+    dataset: cifar10
+    model: resnet8
+    methods: [max_degree, jaccard, metropolis_hastings]
+
+  - name: hp_opt_m095_wd5e4_e3
+    num_clients: 40
+    rounds: 200
+    epochs: 3
+    lr: 0.01
+    momentum: 0.95
+    weight_decay: 0.0005
+    batch_size: 32
+    dataset: cifar10
+    model: resnet8
+    methods: [max_degree, jaccard, metropolis_hastings]

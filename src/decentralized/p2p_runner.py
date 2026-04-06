@@ -6,7 +6,7 @@ import copy
 import time
 import os
 from collections import defaultdict
-from typing import List, Dict
+from typing import List, Dict, Tuple
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from src.decentralized.p2p_client import P2PClient
@@ -61,6 +61,7 @@ class P2PRunner:
         
         # Compute cluster assignments (for two-cluster topology)
         self.cluster_assignments = self._compute_clusters()
+        self.metric_pairs = self._build_weight_diff_metric_pairs()
         
         if self.gossip_schedule:
             schedule_str = ', '.join(f'{s} steps from round {r}' for r, s in self.gossip_schedule)
@@ -78,6 +79,11 @@ class P2PRunner:
                 delay_log = os.path.join(self.logger.get_log_dir(), 'delay_debug.log')
                 os.environ['DELAY_DEBUG_FILE'] = delay_log
                 print(f"Delay debug log file: {delay_log}")
+
+        if self.metric_pairs:
+            print("Post-gossip weight-diff metrics configured:")
+            for name, (i, j) in self.metric_pairs.items():
+                print(f"  - {name}: ({i}, {j})")
     
     def save_topology_visualization(self, output_dir: str, experiment_name: str = "p2p_topology"):
         """Save network topology as interactive HTML.
@@ -117,6 +123,87 @@ class P2PRunner:
         for i in range(self.num_clients):
             clusters[i] = 0 if i < self.num_clients // 2 else 1
         return clusters
+
+    def _cluster_nodes(self, cluster_id: int) -> List[int]:
+        return sorted([n for n, c in self.cluster_assignments.items() if c == cluster_id])
+
+    def _find_central_nodes(self) -> Tuple[int, int]:
+        """Find central bridge nodes that connect the two clusters.
+
+        Preference: endpoints of an inter-cluster edge.
+        Fallback: highest-degree node in each cluster.
+        """
+        bridge_edges = []
+        for u, v in self.graph.edges():
+            if self.cluster_assignments[u] != self.cluster_assignments[v]:
+                bridge_edges.append((u, v))
+
+        if bridge_edges:
+            # Choose deterministically using sorted edge list by node ids
+            u, v = sorted([tuple(sorted(e)) for e in bridge_edges])[0]
+            if self.cluster_assignments[u] == 0:
+                return u, v
+            return v, u
+
+        c0_nodes = self._cluster_nodes(0)
+        c1_nodes = self._cluster_nodes(1)
+        c0 = max(c0_nodes, key=lambda n: self.graph.degree(n))
+        c1 = max(c1_nodes, key=lambda n: self.graph.degree(n))
+        return c0, c1
+
+    @staticmethod
+    def _pick_distinct(nodes: List[int], exclude: List[int], k: int) -> List[int]:
+        chosen = [n for n in nodes if n not in set(exclude)]
+        if len(chosen) >= k:
+            return chosen[:k]
+        # Fallback if the cluster is small.
+        for n in nodes:
+            if n not in chosen:
+                chosen.append(n)
+            if len(chosen) == k:
+                break
+        return chosen
+
+    def _build_weight_diff_metric_pairs(self) -> Dict[str, Tuple[int, int]]:
+        """Build the 8 node pairs used for post-gossip weight-diff metrics."""
+        c1, c2 = self._find_central_nodes()  # c1 in cluster 0, c2 in cluster 1
+        cl0 = self._cluster_nodes(0)
+        cl1 = self._cluster_nodes(1)
+
+        u1 = self._pick_distinct(cl0, [c1], 1)[0]
+        u2 = self._pick_distinct(cl1, [c2], 1)[0]
+
+        a1, b1 = self._pick_distinct(cl0, [], 2)
+        a2, b2 = self._pick_distinct(cl1, [], 2)
+
+        x1 = self._pick_distinct(cl1, [c2], 1)[0]
+        x2 = self._pick_distinct(cl0, [c1], 1)[0]
+
+        p1 = self._pick_distinct(cl0, [c1], 1)[0]
+        p2 = self._pick_distinct(cl1, [c2], 1)[0]
+
+        return {
+            'm1_central_bridge': (c1, c2),
+            'm2_central1_inner1': (c1, u1),
+            'm3_central2_inner2': (c2, u2),
+            'm4_intra_cluster1_pair': (a1, b1),
+            'm5_intra_cluster2_pair': (a2, b2),
+            'm6_central1_to_cluster2': (c1, x1),
+            'm7_central2_to_cluster1': (c2, x2),
+            'm8_cross_cluster_pair': (p1, p2),
+        }
+
+    def _compute_pair_weight_diffs(self) -> Dict[str, float]:
+        """Compute L2 differences for configured node pairs using post-gossip weights."""
+        state_vectors: Dict[int, torch.Tensor] = {}
+        for client in self.clients:
+            state = client.get_state()
+            state_vectors[client.client_id] = torch.cat([v.flatten().float() for v in state.values()])
+
+        values: Dict[str, float] = {}
+        for metric_name, (i, j) in self.metric_pairs.items():
+            values[metric_name] = (state_vectors[i] - state_vectors[j]).norm(2).item()
+        return values
     
     def train_round(self, round_num: int, local_epochs: int = 1) -> Dict[str, any]:
         """Execute one round of P2P federated learning.
@@ -373,6 +460,14 @@ class P2PRunner:
         
         communication_time = time.time() - communication_start
         print(f"Communication took {communication_time:.2f}s")
+
+        pair_weight_diffs = self._compute_pair_weight_diffs()
+        if self.logger:
+            self.logger.log_p2p_pair_weight_diffs(
+                round_num=round_num,
+                metric_values=pair_weight_diffs,
+                metric_pairs=self.metric_pairs,
+            )
         
         # Phase 3: Evaluation (post-gossip) + metric logging
         print("Phase 3: Evaluation...")
@@ -414,7 +509,8 @@ class P2PRunner:
             'eval_accuracies': eval_accuracies,
             'avg_loss': avg_loss,
             'avg_accuracy': avg_accuracy,
-            'gradient_norms': gradient_norms_list
+            'gradient_norms': gradient_norms_list,
+            'pair_weight_diffs': pair_weight_diffs,
         }
     
     def train(self, num_rounds: int, local_epochs: int = 1):
@@ -437,3 +533,4 @@ class P2PRunner:
         # Save final client weights for comparison
         if self.logger:
             self.logger.save_client_final_weights(self.clients)
+            self.logger.plot_p2p_pair_weight_diffs()
