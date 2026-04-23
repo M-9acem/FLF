@@ -163,7 +163,7 @@ trap cleanup EXIT
 
 echo
 echo "===== SMALL SLURM SMOKE EXPERIMENT ====="
-python -u run_all_mixing_methods.py --experiments_yaml experiments_slurm_smoke.yaml
+python -u run_all_mixing_methods.py --experiments_yaml experiments.yaml
 
 echo
 echo "Job finished at $(date)"

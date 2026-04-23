@@ -175,7 +175,13 @@ def run_centralized(args):
     print(f"\nStarting training: {args.rounds} rounds, {args.epochs} local epochs")
     print("-" * 60)
     start_time = time.time()
-    server.train(num_rounds=args.rounds, local_epochs=args.epochs)
+    server.train(
+        num_rounds=args.rounds,
+        local_epochs=args.epochs,
+        use_lr_schedule=args.lr_schedule,
+        warmup_epochs=args.warmup_epochs,
+        warmup_start_lr=args.warmup_start_lr,
+    )
     total_training_time = time.time() - start_time
     
     # Generate final report
@@ -383,7 +389,13 @@ def run_decentralized(args):
         print(f"\nStarting training: {args.rounds} rounds, {args.epochs} local epochs")
     print("-" * 60)
     start_time = time.time()
-    runner.train(num_rounds=args.rounds, local_epochs=args.epochs)
+    runner.train(
+        num_rounds=args.rounds,
+        local_epochs=args.epochs,
+        use_lr_schedule=args.lr_schedule,
+        warmup_epochs=args.warmup_epochs,
+        warmup_start_lr=args.warmup_start_lr,
+    )
     total_training_time = time.time() - start_time
     
     # Generate final report
@@ -459,6 +471,12 @@ def main():
     parser.add_argument('--momentum', type=float, default=0.9, help='SGD momentum')
     parser.add_argument('--weight_decay', type=float, default=0.0, help='Weight decay')
     parser.add_argument('--batch_size', type=int, default=32, help='Batch size')
+    parser.add_argument('--lr_schedule', action='store_true',
+        help='Enable 4-phase LR schedule: warmup -> fixed -> /10 -> /100')
+    parser.add_argument('--warmup_epochs', type=int, default=5,
+        help='Warmup epochs for LR schedule')
+    parser.add_argument('--warmup_start_lr', type=float, default=0.001,
+        help='Starting LR for warmup phase (should be much smaller than --lr)')
     
     # Decentralized parameters
     parser.add_argument('--main_link_prob', type=float, default=1.0, help='Main bridge link probability')

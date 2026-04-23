@@ -205,7 +205,15 @@ class P2PRunner:
             values[metric_name] = (state_vectors[i] - state_vectors[j]).norm(2).item()
         return values
     
-    def train_round(self, round_num: int, local_epochs: int = 1) -> Dict[str, any]:
+    def train_round(
+        self,
+        round_num: int,
+        local_epochs: int = 1,
+        total_epochs: int = 0,
+        use_lr_schedule: bool = False,
+        warmup_epochs: int = 5,
+        warmup_start_lr: float = 0.001,
+    ) -> Dict[str, any]:
         """Execute one round of P2P federated learning.
         
         Args:
@@ -237,7 +245,16 @@ class P2PRunner:
         
         def _train_p2p_client(client):
             """Train a single P2P client and return results."""
-            metrics = client.train(epochs=local_epochs, round_num=round_num)
+            global_epoch_start = (round_num - 1) * local_epochs
+            metrics = client.train(
+                epochs=local_epochs,
+                round_num=round_num,
+                total_epochs=total_epochs,
+                global_epoch_start=global_epoch_start,
+                use_lr_schedule=use_lr_schedule,
+                warmup_epochs=warmup_epochs,
+                warmup_start_lr=warmup_start_lr,
+            )
             state = client.get_state()
             
             grad_norm = metrics['gradient_norms'][-1] if metrics['gradient_norms'] else 0.0
@@ -255,6 +272,8 @@ class P2PRunner:
                 'state': state,
                 'final_loss': metrics['final_loss'],
                 'final_accuracy': metrics['final_accuracy'],
+                'current_lr': metrics.get('current_lr'),
+                'lr_history': metrics.get('lr_history', []),
                 'grad_norm': grad_norm,
                 'gradient_change': gradient_change,
                 'test_metrics': test_metrics,
@@ -326,7 +345,15 @@ class P2PRunner:
                         cluster_id=cluster_id,
                         train_accuracy=result['final_accuracy'],
                         train_loss=result['final_loss'],
-                        num_samples=result.get('num_samples')
+                        num_samples=result.get('num_samples'),
+                        current_lr=result.get('current_lr')
+                    )
+                    self.logger.log_lr_schedule_metrics(
+                        mode='decentralized',
+                        stage='pre_gossip',
+                        client_id=client.client_id,
+                        round_num=round_num,
+                        lr_history=result.get('lr_history', [])
                     )
 
         # Compute and evaluate the weighted-average (virtual FedAvg) model pre-gossip
@@ -492,7 +519,8 @@ class P2PRunner:
                     cluster_id=cluster_id,
                     train_accuracy=result['final_accuracy'],
                     train_loss=result['final_loss'],
-                    num_samples=result.get('num_samples')
+                    num_samples=result.get('num_samples'),
+                    current_lr=result.get('current_lr')
                 )
         
         avg_loss = np.mean(eval_losses)
@@ -513,15 +541,31 @@ class P2PRunner:
             'pair_weight_diffs': pair_weight_diffs,
         }
     
-    def train(self, num_rounds: int, local_epochs: int = 1):
+    def train(
+        self,
+        num_rounds: int,
+        local_epochs: int = 1,
+        use_lr_schedule: bool = False,
+        warmup_epochs: int = 5,
+        warmup_start_lr: float = 0.001,
+    ):
         """Train for multiple rounds.
         
         Args:
             num_rounds: Number of federated rounds
             local_epochs: Local epochs per round
         """
+        total_epochs = num_rounds * local_epochs
+
         for round_num in range(1, num_rounds + 1):
-            self.train_round(round_num, local_epochs)
+            self.train_round(
+                round_num,
+                local_epochs,
+                total_epochs=total_epochs,
+                use_lr_schedule=use_lr_schedule,
+                warmup_epochs=warmup_epochs,
+                warmup_start_lr=warmup_start_lr,
+            )
         
         print("\n=== Training Complete ===")
 

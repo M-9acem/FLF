@@ -73,7 +73,15 @@ class FedAvgServer:
             for k, v in aggregated_state.items()
         })
     
-    def train_round(self, round_num: int, local_epochs: int = 1) -> Dict[str, any]:
+    def train_round(
+        self,
+        round_num: int,
+        local_epochs: int = 1,
+        total_epochs: int = 0,
+        use_lr_schedule: bool = False,
+        warmup_epochs: int = 5,
+        warmup_start_lr: float = 0.001,
+    ) -> Dict[str, any]:
         """Execute one round of federated learning.
         
         Args:
@@ -102,7 +110,15 @@ class FedAvgServer:
         def _train_client(client, local_epochs):
             """Train a single client and return results."""
             prev_grad_norm = getattr(client, 'prev_gradient_norm', None)
-            metrics = client.train(epochs=local_epochs)
+            global_epoch_start = (round_num - 1) * local_epochs
+            metrics = client.train(
+                epochs=local_epochs,
+                total_epochs=total_epochs,
+                global_epoch_start=global_epoch_start,
+                use_lr_schedule=use_lr_schedule,
+                warmup_epochs=warmup_epochs,
+                warmup_start_lr=warmup_start_lr,
+            )
             
             params = client.get_parameters()
             grad_norm = metrics['gradient_norms'][-1] if metrics['gradient_norms'] else 0.0
@@ -122,6 +138,8 @@ class FedAvgServer:
                 'num_samples': metrics['num_samples'],
                 'final_loss': metrics['final_loss'],
                 'final_accuracy': metrics['final_accuracy'],
+                'current_lr': metrics.get('current_lr'),
+                'lr_history': metrics.get('lr_history', []),
                 'grad_norm': grad_norm,
                 'gradient_change': gradient_change,
                 'test_metrics': test_metrics
@@ -170,7 +188,15 @@ class FedAvgServer:
                         gradient_change=result['gradient_change'],
                         class_metrics=result['test_metrics'].get('class_metrics', {}),
                         train_accuracy=result['final_accuracy'],
-                        train_loss=result['final_loss']
+                        train_loss=result['final_loss'],
+                        current_lr=result.get('current_lr')
+                    )
+                    self.logger.log_lr_schedule_metrics(
+                        mode='centralized',
+                        stage='local_train',
+                        client_id=client.client_id,
+                        round_num=round_num,
+                        lr_history=result.get('lr_history', [])
                     )
                 
                 print(f"Client {client.client_id} - Loss: {result['final_loss']:.4f}, Acc: {result['final_accuracy']:.2f}%")
@@ -196,7 +222,15 @@ class FedAvgServer:
                         gradient_change=result['gradient_change'],
                         class_metrics=result['test_metrics'].get('class_metrics', {}),
                         train_accuracy=result['final_accuracy'],
-                        train_loss=result['final_loss']
+                        train_loss=result['final_loss'],
+                        current_lr=result.get('current_lr')
+                    )
+                    self.logger.log_lr_schedule_metrics(
+                        mode='centralized',
+                        stage='local_train',
+                        client_id=client.client_id,
+                        round_num=round_num,
+                        lr_history=result.get('lr_history', [])
                     )
                 
                 print(f"Loss: {result['final_loss']:.4f}, Acc: {result['final_accuracy']:.2f}%")
@@ -305,15 +339,31 @@ class FedAvgServer:
         
         return result
     
-    def train(self, num_rounds: int, local_epochs: int = 1):
+    def train(
+        self,
+        num_rounds: int,
+        local_epochs: int = 1,
+        use_lr_schedule: bool = False,
+        warmup_epochs: int = 5,
+        warmup_start_lr: float = 0.001,
+    ):
         """Train for multiple rounds.
         
         Args:
             num_rounds: Number of federated rounds
             local_epochs: Local epochs per round
         """
+        total_epochs = num_rounds * local_epochs
+
         # Training loop
         for round_num in range(1, num_rounds + 1):
-            self.train_round(round_num, local_epochs)
+            self.train_round(
+                round_num,
+                local_epochs,
+                total_epochs=total_epochs,
+                use_lr_schedule=use_lr_schedule,
+                warmup_epochs=warmup_epochs,
+                warmup_start_lr=warmup_start_lr,
+            )
         
         print("\n=== Training Complete ===")

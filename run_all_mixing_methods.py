@@ -43,6 +43,9 @@ DEFAULTS = dict(
     momentum          = 0.9,
     weight_decay      = 0.0,
     batch_size        = 32,
+    lr_schedule       = False,
+    warmup_epochs     = 5,
+    warmup_start_lr   = 0.001,
 )
 
 ALL_METHODS = [
@@ -174,6 +177,9 @@ def run_experiment(cfg: dict) -> list:
     momentum      = float(cfg.get("momentum", 0.9))
     weight_decay  = float(cfg.get("weight_decay", 0.0))
     batch_size    = int(cfg.get("batch_size", 32))
+    lr_schedule   = bool(cfg.get("lr_schedule", False))
+    warmup_epochs = int(cfg.get("warmup_epochs", 5))
+    warmup_start_lr = float(cfg.get("warmup_start_lr", 0.001))
 
     gossip_desc = f"schedule {gossip_sched}" if gossip_sched else f"{gossip_steps} gossip steps/round"
 
@@ -184,6 +190,7 @@ def run_experiment(cfg: dict) -> list:
     print(f"  delay_d={delay_d}")
     print(f"  dataset={dataset}, model={model}")
     print(f"  lr={lr}, momentum={momentum}, weight_decay={weight_decay}, batch_size={batch_size}")
+    print(f"  lr_schedule={lr_schedule}, warmup_epochs={warmup_epochs}, warmup_start_lr={warmup_start_lr}")
 
     topology_path  = resolve_topology(cfg)
     init_weights   = resolve_init_weights(cfg)
@@ -233,6 +240,13 @@ def run_experiment(cfg: dict) -> list:
             cmd += ["--gossip_schedule", gossip_sched]
         else:
             cmd += ["--gossip_steps", str(gossip_steps)]
+
+        if lr_schedule:
+            cmd += [
+                "--lr_schedule",
+                "--warmup_epochs", str(warmup_epochs),
+                "--warmup_start_lr", str(warmup_start_lr),
+            ]
 
         method_start = datetime.now()
         try:

@@ -301,12 +301,26 @@ class P2PClient:
         """
         self.neighbor_models = copy.deepcopy(neighbor_states)
     
-    def train(self, epochs: int = 1, round_num: int = None) -> Dict[str, any]:
+    def train(
+        self,
+        epochs: int = 1,
+        round_num: int = None,
+        total_epochs: int = 0,
+        global_epoch_start: int = 0,
+        use_lr_schedule: bool = False,
+        warmup_epochs: int = 5,
+        warmup_start_lr: float = 0.001,
+    ) -> Dict[str, any]:
         """Train the local model.
         
         Args:
             epochs: Number of local training epochs
             round_num: Current round number
+            total_epochs: Total training epochs across all rounds
+            global_epoch_start: Global epoch index where this local train call starts
+            use_lr_schedule: Whether to apply the custom 4-phase LR schedule
+            warmup_epochs: Warmup length used by the LR schedule
+            warmup_start_lr: Starting LR used by the warmup phase
             
         Returns:
             Dictionary with training metrics
@@ -323,6 +337,7 @@ class P2PClient:
         epoch_losses = []
         epoch_accuracies = []
         epoch_gradient_norms = []
+        lr_history = []
         last_grad_vec = None  # will hold the mean gradient vector over all batches of the last epoch
         
         # Per-class metrics
@@ -331,6 +346,28 @@ class P2PClient:
         class_total = [0] * num_classes
         
         for epoch in range(epochs):
+            current_epoch = global_epoch_start + epoch
+            if use_lr_schedule and total_epochs > 0:
+                scheduled_lr = self._compute_scheduled_lr(
+                    base_lr=self.learning_rate,
+                    current_epoch=current_epoch,
+                    total_epochs=total_epochs,
+                    warmup_epochs=warmup_epochs,
+                    warmup_start_lr=warmup_start_lr,
+                )
+                for param_group in optimizer.param_groups:
+                    param_group['lr'] = scheduled_lr
+                current_lr = scheduled_lr
+            else:
+                current_lr = self.learning_rate
+
+            lr_history.append({
+                'local_epoch': epoch,
+                'global_epoch': current_epoch,
+                'lr': current_lr,
+                'phase': self._get_schedule_phase(current_epoch, total_epochs, warmup_epochs)
+            })
+
             total_loss = 0.0
             correct = 0
             total = 0
@@ -399,8 +436,52 @@ class P2PClient:
             'class_accuracies': class_accuracies,
             'final_loss': epoch_losses[-1],
             'final_accuracy': epoch_accuracies[-1],
-            'last_grad_vec': last_grad_vec  # raw gradient vector: last batch of last epoch
+            'last_grad_vec': last_grad_vec,  # raw gradient vector: last batch of last epoch
+            'lr_history': lr_history,
+            'current_lr': lr_history[-1]['lr'] if lr_history else self.learning_rate,
         }
+
+    @staticmethod
+    def _compute_scheduled_lr(
+        base_lr: float,
+        current_epoch: int,
+        total_epochs: int,
+        warmup_epochs: int,
+        warmup_start_lr: float,
+    ) -> float:
+        half_epoch = total_epochs * 0.5
+        three_quarter_epoch = total_epochs * 0.75
+
+        # Phase 1 - Warmup: linearly increase from warmup_start_lr to base_lr.
+        if current_epoch <= warmup_epochs:
+            return warmup_start_lr + (base_lr - warmup_start_lr) * (current_epoch / max(1, warmup_epochs))
+
+        # Phase 2 - Fixed: keep learning rate at base_lr until halfway point.
+        if current_epoch < half_epoch:
+            return base_lr
+
+        # Phase 3 - First decay: reduce learning rate to base_lr / 10.
+        if current_epoch < three_quarter_epoch:
+            return base_lr / 10.0
+
+        # Phase 4 - Second decay: reduce learning rate to base_lr / 100 until the end.
+        return base_lr / 100.0
+
+    @staticmethod
+    def _get_schedule_phase(current_epoch: int, total_epochs: int, warmup_epochs: int) -> str:
+        if total_epochs <= 0:
+            return 'constant'
+
+        half_epoch = total_epochs * 0.5
+        three_quarter_epoch = total_epochs * 0.75
+
+        if current_epoch <= warmup_epochs:
+            return 'warmup'
+        if current_epoch < half_epoch:
+            return 'fixed'
+        if current_epoch < three_quarter_epoch:
+            return 'decay_1'
+        return 'decay_2'
     
     def gossip_aggregate(self, weights: Dict[int, float]) -> float:
         """Aggregate model with neighbors using gossip protocol.

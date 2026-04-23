@@ -26,6 +26,7 @@ class ComprehensiveLogger:
         self.exp_dir = Path(log_dir) / experiment_name / timestamp
         self.exp_dir.mkdir(parents=True, exist_ok=True)
         self.mode = mode
+        self.start_time = datetime.now()
         
         # Create subdirectories
         self.plots_dir = self.exp_dir / "plots"
@@ -48,6 +49,10 @@ class ComprehensiveLogger:
             'communication_efficiency': [],
             'round_summaries': []
         }
+
+    def _time_fields(self):
+        now = datetime.now()
+        return now.isoformat(), (now - self.start_time).total_seconds()
         
     def _init_log_files(self):
         """Initialize CSV files with headers based on mode."""
@@ -614,25 +619,27 @@ class ComprehensiveLogger:
             total_samples: Total number of training samples across all clients
         """
         csv_file = self.exp_dir / "global_aggregated_metrics.csv"
+        timestamp, elapsed_seconds = self._time_fields()
+
         if not csv_file.exists():
             with open(csv_file, 'w', newline='') as f:
                 writer = csv.writer(f)
-                writer.writerow(['round', 'test_accuracy', 'test_loss', 'total_samples'])
+                writer.writerow(['round', 'timestamp', 'elapsed_seconds', 'test_accuracy', 'test_loss', 'total_samples'])
         with open(csv_file, 'a', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow([round_num, test_accuracy, test_loss, total_samples])
+            writer.writerow([round_num, timestamp, elapsed_seconds, test_accuracy, test_loss, total_samples])
 
         class_csv_file = self.exp_dir / "global_aggregated_per_class_metrics.csv"
         if not class_csv_file.exists():
             with open(class_csv_file, 'w', newline='') as f:
                 writer = csv.writer(f)
-                writer.writerow(['round', 'class_id',
+                writer.writerow(['round', 'timestamp', 'elapsed_seconds', 'class_id',
                                  'class_accuracy', 'class_precision', 'class_recall', 'class_f1_score'])
         with open(class_csv_file, 'a', newline='') as f:
             writer = csv.writer(f)
             for class_id, metrics in class_metrics.items():
                 writer.writerow([
-                    round_num, class_id,
+                    round_num, timestamp, elapsed_seconds, class_id,
                     metrics.get('accuracy', 0.0),
                     metrics.get('precision', 0.0),
                     metrics.get('recall', 0.0),
@@ -688,7 +695,8 @@ class ComprehensiveLogger:
         cluster_id: int = None,
         train_accuracy: float = None,
         train_loss: float = None,
-        num_samples: int = None
+        num_samples: int = None,
+        current_lr: float = None
     ):
         """Log per-client metrics captured before gossip aggregation.
 
@@ -705,24 +713,26 @@ class ComprehensiveLogger:
             train_loss: Training loss (last epoch)
             num_samples: Number of training samples
         """
+        timestamp, elapsed_seconds = self._time_fields()
+
         # Main metrics CSV
         csv_file = self.exp_dir / "pre_gossip_metrics.csv"
         if not csv_file.exists():
             with open(csv_file, 'w', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow([
-                    'client_id', 'round', 'cluster_id',
+                    'client_id', 'round', 'timestamp', 'elapsed_seconds', 'cluster_id',
                     'train_accuracy', 'train_loss',
                     'test_accuracy', 'test_loss',
-                    'num_samples'
+                    'num_samples', 'current_lr'
                 ])
         with open(csv_file, 'a', newline='') as f:
             writer = csv.writer(f)
             writer.writerow([
-                client_id, round_num, cluster_id,
+                client_id, round_num, timestamp, elapsed_seconds, cluster_id,
                 train_accuracy, train_loss,
                 test_accuracy, test_loss,
-                num_samples
+                num_samples, current_lr
             ])
 
         # Per-class metrics CSV
@@ -731,14 +741,14 @@ class ComprehensiveLogger:
             with open(class_csv_file, 'w', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow([
-                    'client_id', 'round', 'cluster_id', 'class_id',
+                    'client_id', 'round', 'timestamp', 'elapsed_seconds', 'cluster_id', 'class_id',
                     'class_accuracy', 'class_precision', 'class_recall', 'class_f1_score'
                 ])
         with open(class_csv_file, 'a', newline='') as f:
             writer = csv.writer(f)
             for class_id, metrics in class_metrics.items():
                 writer.writerow([
-                    client_id, round_num, cluster_id, class_id,
+                    client_id, round_num, timestamp, elapsed_seconds, cluster_id, class_id,
                     metrics.get('accuracy', 0.0),
                     metrics.get('precision', 0.0),
                     metrics.get('recall', 0.0),
@@ -785,7 +795,8 @@ class ComprehensiveLogger:
         cluster_id: int = None,
         train_accuracy: float = None,
         train_loss: float = None,
-        num_samples: int = None
+        num_samples: int = None,
+        current_lr: float = None
     ):
         """Simplified logging method for P2P decentralized experiments.
         
@@ -804,48 +815,93 @@ class ComprehensiveLogger:
             train_accuracy: Training accuracy for this client (last epoch)
             train_loss: Training loss for this client (last epoch)
         """
+        timestamp, elapsed_seconds = self._time_fields()
+
         # Create simplified CSV file if not exists
         p2p_file = self.exp_dir / "p2p_metrics.csv"
         if not p2p_file.exists():
             with open(p2p_file, 'w', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow([
-                    'client_id', 'round', 'cluster_id',
+                    'client_id', 'round', 'timestamp', 'elapsed_seconds', 'cluster_id',
                     'train_accuracy', 'train_loss',
                     'test_accuracy', 'test_loss',
-                    'num_samples'
+                    'num_samples', 'current_lr'
                 ])
         
         # Log overall metrics
         with open(p2p_file, 'a', newline='') as f:
             writer = csv.writer(f)
             writer.writerow([
-                client_id, round_num, cluster_id,
+                client_id, round_num, timestamp, elapsed_seconds, cluster_id,
                 train_accuracy, train_loss,
                 test_accuracy, test_loss,
-                num_samples
+                num_samples, current_lr
             ])
-        
+
         # Create per-class CSV file if not exists
         p2p_class_file = self.exp_dir / "p2p_per_class_metrics.csv"
         if not p2p_class_file.exists():
             with open(p2p_class_file, 'w', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow([
-                    'client_id', 'round', 'cluster_id', 'class_id',
+                    'client_id', 'round', 'timestamp', 'elapsed_seconds', 'cluster_id', 'class_id',
                     'class_accuracy', 'class_precision', 'class_recall', 'class_f1_score'
                 ])
-        
+
         # Log per-class metrics
         with open(p2p_class_file, 'a', newline='') as f:
             writer = csv.writer(f)
             for class_id, metrics in class_metrics.items():
                 writer.writerow([
-                    client_id, round_num, cluster_id, class_id,
+                    client_id, round_num, timestamp, elapsed_seconds, cluster_id, class_id,
                     metrics.get('accuracy', 0.0),
                     metrics.get('precision', 0.0),
                     metrics.get('recall', 0.0),
                     metrics.get('f1_score', 0.0)
+                ])
+
+    def log_lr_schedule_metrics(
+        self,
+        mode: str,
+        stage: str,
+        client_id: int,
+        round_num: int,
+        lr_history: List[Dict[str, Any]],
+    ):
+        """Log per-epoch learning-rate schedule values for each client.
+
+        Args:
+            mode: Training mode ('centralized' or 'decentralized')
+            stage: Pipeline stage (e.g. 'local_train', 'pre_gossip')
+            client_id: Client identifier
+            round_num: Round number
+            lr_history: List of dicts with local/global epoch, lr and phase
+        """
+        lr_file = self.exp_dir / "lr_schedule.csv"
+        if not lr_file.exists():
+            with open(lr_file, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    'mode', 'stage', 'client_id', 'round', 'timestamp', 'elapsed_seconds',
+                    'local_epoch', 'global_epoch', 'lr', 'phase'
+                ])
+
+        with open(lr_file, 'a', newline='') as f:
+            writer = csv.writer(f)
+            for row in lr_history:
+                timestamp, elapsed_seconds = self._time_fields()
+                writer.writerow([
+                    mode,
+                    stage,
+                    client_id,
+                    round_num,
+                    timestamp,
+                    elapsed_seconds,
+                    row.get('local_epoch'),
+                    row.get('global_epoch'),
+                    row.get('lr'),
+                    row.get('phase'),
                 ])
 
     def log_p2p_pair_weight_diffs(
@@ -861,12 +917,14 @@ class ComprehensiveLogger:
             metric_values: Mapping metric name -> L2 difference value
             metric_pairs: Mapping metric name -> (node_i, node_j)
         """
+        timestamp, elapsed_seconds = self._time_fields()
+
         csv_file = self.exp_dir / "p2p_pair_weight_diffs.csv"
         if not csv_file.exists():
             with open(csv_file, 'w', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow([
-                    'round', 'metric_name', 'node_i', 'node_j', 'weight_diff_l2'
+                    'round', 'timestamp', 'elapsed_seconds', 'metric_name', 'node_i', 'node_j', 'weight_diff_l2'
                 ])
 
         with open(csv_file, 'a', newline='') as f:
@@ -875,6 +933,8 @@ class ComprehensiveLogger:
                 node_i, node_j = metric_pairs[metric_name]
                 writer.writerow([
                     round_num,
+                    timestamp,
+                    elapsed_seconds,
                     metric_name,
                     int(node_i),
                     int(node_j),
@@ -947,13 +1007,15 @@ class ComprehensiveLogger:
             train_accuracy: Average training accuracy across clients
             train_loss: Average training loss across clients
         """
+        timestamp, elapsed_seconds = self._time_fields()
+
         # Create global metrics file if not exists
         global_file = self.exp_dir / "centralized_global_metrics.csv"
         if not global_file.exists():
             with open(global_file, 'w', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow([
-                    'round', 'train_accuracy', 'train_loss',
+                    'round', 'timestamp', 'elapsed_seconds', 'train_accuracy', 'train_loss',
                     'test_accuracy', 'test_loss',
                     'gradient_norm', 'gradient_change'
                 ])
@@ -962,7 +1024,7 @@ class ComprehensiveLogger:
         with open(global_file, 'a', newline='') as f:
             writer = csv.writer(f)
             writer.writerow([
-                round_num, train_accuracy, train_loss,
+                round_num, timestamp, elapsed_seconds, train_accuracy, train_loss,
                 test_accuracy, test_loss,
                 gradient_norm, gradient_change
             ])
@@ -973,7 +1035,7 @@ class ComprehensiveLogger:
             with open(global_class_file, 'w', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow([
-                    'round', 'class_id',
+                    'round', 'timestamp', 'elapsed_seconds', 'class_id',
                     'class_accuracy', 'class_loss',
                     'class_precision', 'class_recall', 'class_f1_score'
                 ])
@@ -983,7 +1045,7 @@ class ComprehensiveLogger:
             writer = csv.writer(f)
             for class_id, metrics in class_metrics.items():
                 writer.writerow([
-                    round_num, class_id,
+                    round_num, timestamp, elapsed_seconds, class_id,
                     metrics.get('accuracy', 0.0),
                     metrics.get('loss', 0.0),
                     metrics.get('precision', 0.0),
@@ -1001,7 +1063,8 @@ class ComprehensiveLogger:
         gradient_change: float,
         class_metrics: Dict[int, Dict[str, float]],
         train_accuracy: float = None,
-        train_loss: float = None
+        train_loss: float = None,
+        current_lr: float = None
     ):
         """Simplified logging for centralized client metrics.
         
@@ -1016,24 +1079,26 @@ class ComprehensiveLogger:
             train_accuracy: Training accuracy for this client (last epoch)
             train_loss: Training loss for this client (last epoch)
         """
+        timestamp, elapsed_seconds = self._time_fields()
+
         # Create client metrics file if not exists
         client_file = self.exp_dir / "centralized_client_metrics.csv"
         if not client_file.exists():
             with open(client_file, 'w', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow([
-                    'client_id', 'round', 'train_accuracy', 'train_loss',
+                    'client_id', 'round', 'timestamp', 'elapsed_seconds', 'train_accuracy', 'train_loss',
                     'test_accuracy', 'test_loss',
-                    'gradient_norm', 'gradient_change'
+                    'gradient_norm', 'gradient_change', 'current_lr'
                 ])
         
         # Log client metrics
         with open(client_file, 'a', newline='') as f:
             writer = csv.writer(f)
             writer.writerow([
-                client_id, round_num, train_accuracy, train_loss,
+                client_id, round_num, timestamp, elapsed_seconds, train_accuracy, train_loss,
                 test_accuracy, test_loss,
-                gradient_norm, gradient_change
+                gradient_norm, gradient_change, current_lr
             ])
         
         # Create client per-class file if not exists
@@ -1042,7 +1107,7 @@ class ComprehensiveLogger:
             with open(client_class_file, 'w', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow([
-                    'client_id', 'round', 'class_id',
+                    'client_id', 'round', 'timestamp', 'elapsed_seconds', 'class_id',
                     'class_accuracy', 'class_loss',
                     'class_precision', 'class_recall', 'class_f1_score'
                 ])
@@ -1052,7 +1117,7 @@ class ComprehensiveLogger:
             writer = csv.writer(f)
             for class_id, metrics in class_metrics.items():
                 writer.writerow([
-                    client_id, round_num, class_id,
+                    client_id, round_num, timestamp, elapsed_seconds, class_id,
                     metrics.get('accuracy', 0.0),
                     metrics.get('loss', 0.0),
                     metrics.get('precision', 0.0),
