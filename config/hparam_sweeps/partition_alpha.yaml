@@ -1,0 +1,84 @@
+# Sweep: Dirichlet alpha (data heterogeneity)
+# Run:
+#   /home/skacem/Desktop/FLF/venv/bin/python run_all_mixing_methods.py --experiments_yaml config/hparam_sweeps/partition_alpha.yaml
+
+experiments:
+  - name: hp_alpha_01
+    num_clients: 40
+    rounds: 200
+    epochs: 2
+    partition: dirichlet
+    alpha: 0.1
+    dataset: cifar10
+    model: resnet8
+    methods: [max_degree, jaccard, metropolis_hastings]
+
+  - name: hp_alpha_03
+    num_clients: 40
+    rounds: 200
+    epochs: 2
+    partition: dirichlet
+    alpha: 0.3
+    dataset: cifar10
+    model: resnet8
+    methods: [max_degree, jaccard, metropolis_hastings]
+
+  - name: hp_alpha_05
+    num_clients: 40
+    rounds: 200
+    epochs: 2
+    partition: dirichlet
+    alpha: 0.5
+    dataset: cifar10
+    model: resnet8
+    methods: [max_degree, jaccard, metropolis_hastings]
+
+  - name: hp_alpha_10
+    num_clients: 40
+    rounds: 200
+    epochs: 2
+    partition: dirichlet
+    alpha: 1.0
+    dataset: cifar10
+    model: resnet8
+    methods: [max_degree, jaccard, metropolis_hastings]
+
+  - name: hp_alpha_01_e3
+    num_clients: 40
+    rounds: 200
+    epochs: 3
+    partition: dirichlet
+    alpha: 0.1
+    dataset: cifar10
+    model: resnet8
+    methods: [max_degree, jaccard, metropolis_hastings]
+
+  - name: hp_alpha_03_e3
+    num_clients: 40
+    rounds: 200
+    epochs: 3
+    partition: dirichlet
+    alpha: 0.3
+    dataset: cifar10
+    model: resnet8
+    methods: [max_degree, jaccard, metropolis_hastings]
+
+  - name: hp_alpha_05_e3
+    num_clients: 40
+    rounds: 200
+    epochs: 3
+    partition: dirichlet
+    alpha: 0.5
+    dataset: cifar10
+    model: resnet8
+    methods: [max_degree, jaccard, metropolis_hastings]
+
+  - name: hp_alpha_10_e3
+    num_clients: 40
+    rounds: 200
+    epochs: 3
+    partition: dirichlet
+    alpha: 1.0
+    dataset: cifar10
+    model: resnet8
+    methods: [max_degree, jaccard, metropolis_hastings]

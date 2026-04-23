@@ -298,12 +298,27 @@ def run_decentralized(args):
         )
         print(f"Graph: {graph.number_of_nodes()} nodes, {graph.number_of_edges()} edges")
     
-    # Load shared initial weights w_0 so every client starts identically
-    w0_path = Path(args.init_weights) if args.init_weights else Path('init_weights') / f'{args.model}_w0.pt'
+    # Load shared initial weights w_0 so every client starts identically.
+    # Prefer dataset-specific files and keep legacy fallback for compatibility.
+    if args.init_weights:
+        w0_path = Path(args.init_weights)
+    else:
+        dataset_w0 = Path('init_weights') / f'{args.model}_{args.dataset}_w0.pt'
+        legacy_w0 = Path('init_weights') / f'{args.model}_w0.pt'
+        w0_path = dataset_w0 if dataset_w0.exists() else legacy_w0
+
     if not w0_path.exists():
-        print(f'Initial weights not found at {w0_path} — running generate_init_weights.py ...')
+        print('Initial weights not found. Running generate_init_weights.py ...')
         import subprocess as _sp
         _sp.run([sys.executable, 'generate_init_weights.py'], check=True)
+        if not args.init_weights:
+            dataset_w0 = Path('init_weights') / f'{args.model}_{args.dataset}_w0.pt'
+            legacy_w0 = Path('init_weights') / f'{args.model}_w0.pt'
+            w0_path = dataset_w0 if dataset_w0.exists() else legacy_w0
+        if not w0_path.exists():
+            raise FileNotFoundError(
+                f'Could not find init weights after generation. Tried: {w0_path}'
+            )
     shared_w0 = torch.load(w0_path, map_location='cpu', weights_only=True)
     print(f'Loaded shared initial weights from: {w0_path}')
 
@@ -476,7 +491,8 @@ def main():
     parser.add_argument('--num_workers', type=int, default=0, help='Number of data loading workers')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
     parser.add_argument('--init_weights', type=str, default=None,
-        help='Path to a w_0.pt file. Defaults to init_weights/<model>_w0.pt. '
+        help='Path to a w_0.pt file. Defaults to init_weights/<model>_<dataset>_w0.pt '
+             '(legacy fallback: init_weights/<model>_w0.pt). '
              'Run generate_init_weights.py once to create these files.')
     parser.add_argument('--partition_file', type=str, default=None,
         help='Path to a pre-generated partition .pkl file. '

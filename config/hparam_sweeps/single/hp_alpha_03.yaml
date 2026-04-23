@@ -1,0 +1,10 @@
+experiments:
+  - name: hp_alpha_03
+    num_clients: 40
+    rounds: 200
+    epochs: 2
+    partition: dirichlet
+    alpha: 0.3
+    dataset: cifar10
+    model: resnet8
+    methods: [max_degree, jaccard, metropolis_hastings]

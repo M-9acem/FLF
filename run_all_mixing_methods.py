@@ -39,6 +39,10 @@ DEFAULTS = dict(
     init_weights      = None,   # auto-managed if None
     partition_file    = None,   # auto-managed if None
     methods           = None,   # None → run all 5
+    lr                = 0.01,
+    momentum          = 0.9,
+    weight_decay      = 0.0,
+    batch_size        = 32,
 )
 
 ALL_METHODS = [
@@ -104,10 +108,13 @@ def resolve_init_weights(cfg: dict) -> Path:
         path = Path(cfg["init_weights"])
         print(f"  weights  : {path} (specified)")
         return path
-    path = Path("init_weights") / f"{cfg['model']}_w0.pt"
+    dataset_path = Path("init_weights") / f"{cfg['model']}_{cfg['dataset']}_w0.pt"
+    legacy_path = Path("init_weights") / f"{cfg['model']}_w0.pt"
+    path = dataset_path if dataset_path.exists() else legacy_path
     if not path.exists():
-        print(f"  weights  : {path} not found — running generate_init_weights.py ...")
+        print("  weights  : no compatible file found — running generate_init_weights.py ...")
         subprocess.run([sys.executable, "generate_init_weights.py"], check=True)
+        path = dataset_path if dataset_path.exists() else legacy_path
     print(f"  weights  : {path}")
     return path
 
@@ -163,6 +170,10 @@ def run_experiment(cfg: dict) -> list:
     gossip_sched  = cfg.get("gossip_schedule")
     gossip_steps  = cfg.get("gossip_steps", 1)
     delay_d       = int(cfg.get("delay_d", 0))
+    lr            = float(cfg.get("lr", 0.01))
+    momentum      = float(cfg.get("momentum", 0.9))
+    weight_decay  = float(cfg.get("weight_decay", 0.0))
+    batch_size    = int(cfg.get("batch_size", 32))
 
     gossip_desc = f"schedule {gossip_sched}" if gossip_sched else f"{gossip_steps} gossip steps/round"
 
@@ -172,6 +183,7 @@ def run_experiment(cfg: dict) -> list:
     print(f"  clients={n_clients}, rounds={rounds}, epochs={epochs}, {gossip_desc}")
     print(f"  delay_d={delay_d}")
     print(f"  dataset={dataset}, model={model}")
+    print(f"  lr={lr}, momentum={momentum}, weight_decay={weight_decay}, batch_size={batch_size}")
 
     topology_path  = resolve_topology(cfg)
     init_weights   = resolve_init_weights(cfg)
@@ -206,6 +218,10 @@ def run_experiment(cfg: dict) -> list:
             "--rounds",          str(rounds),
             "--epochs",          str(epochs),
             "--delay_d",         str(delay_d),
+            "--lr",              str(lr),
+            "--momentum",        str(momentum),
+            "--weight_decay",    str(weight_decay),
+            "--batch_size",      str(batch_size),
             "--dataset",         dataset,
             "--model",           model,
             "--experiment_name", full_exp_name,

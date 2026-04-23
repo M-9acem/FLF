@@ -1,0 +1,100 @@
+# Sweep: learning rate
+# Run:
+#   /home/skacem/Desktop/FLF/venv/bin/python run_all_mixing_methods.py --experiments_yaml config/hparam_sweeps/learning_rate.yaml
+
+experiments:
+  - name: hp_lr_0005
+    num_clients: 40
+    rounds: 200
+    epochs: 2
+    lr: 0.005
+    momentum: 0.9
+    weight_decay: 0.0
+    batch_size: 32
+    dataset: cifar10
+    model: resnet8
+    methods: [max_degree, jaccard, metropolis_hastings]
+
+  - name: hp_lr_001
+    num_clients: 40
+    rounds: 200
+    epochs: 2
+    lr: 0.01
+    momentum: 0.9
+    weight_decay: 0.0
+    batch_size: 32
+    dataset: cifar10
+    model: resnet8
+    methods: [max_degree, jaccard, metropolis_hastings]
+
+  - name: hp_lr_002
+    num_clients: 40
+    rounds: 200
+    epochs: 2
+    lr: 0.02
+    momentum: 0.9
+    weight_decay: 0.0
+    batch_size: 32
+    dataset: cifar10
+    model: resnet8
+    methods: [max_degree, jaccard, metropolis_hastings]
+
+  - name: hp_lr_005
+    num_clients: 40
+    rounds: 200
+    epochs: 2
+    lr: 0.05
+    momentum: 0.9
+    weight_decay: 0.0
+    batch_size: 32
+    dataset: cifar10
+    model: resnet8
+    methods: [max_degree, jaccard, metropolis_hastings]
+
+  - name: hp_lr_0005_e3
+    num_clients: 40
+    rounds: 200
+    epochs: 3
+    lr: 0.005
+    momentum: 0.9
+    weight_decay: 0.0
+    batch_size: 32
+    dataset: cifar10
+    model: resnet8
+    methods: [max_degree, jaccard, metropolis_hastings]
+
+  - name: hp_lr_001_e3
+    num_clients: 40
+    rounds: 200
+    epochs: 3
+    lr: 0.01
+    momentum: 0.9
+    weight_decay: 0.0
+    batch_size: 32
+    dataset: cifar10
+    model: resnet8
+    methods: [max_degree, jaccard, metropolis_hastings]
+
+  - name: hp_lr_002_e3
+    num_clients: 40
+    rounds: 200
+    epochs: 3
+    lr: 0.02
+    momentum: 0.9
+    weight_decay: 0.0
+    batch_size: 32
+    dataset: cifar10
+    model: resnet8
+    methods: [max_degree, jaccard, metropolis_hastings]
+
+  - name: hp_lr_005_e3
+    num_clients: 40
+    rounds: 200
+    epochs: 3
+    lr: 0.05
+    momentum: 0.9
+    weight_decay: 0.0
+    batch_size: 32
+    dataset: cifar10
+    model: resnet8
+    methods: [max_degree, jaccard, metropolis_hastings]
