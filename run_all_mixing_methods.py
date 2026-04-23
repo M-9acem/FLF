@@ -108,10 +108,13 @@ def resolve_init_weights(cfg: dict) -> Path:
         path = Path(cfg["init_weights"])
         print(f"  weights  : {path} (specified)")
         return path
-    path = Path("init_weights") / f"{cfg['model']}_w0.pt"
+    dataset_path = Path("init_weights") / f"{cfg['model']}_{cfg['dataset']}_w0.pt"
+    legacy_path = Path("init_weights") / f"{cfg['model']}_w0.pt"
+    path = dataset_path if dataset_path.exists() else legacy_path
     if not path.exists():
-        print(f"  weights  : {path} not found — running generate_init_weights.py ...")
+        print("  weights  : no compatible file found — running generate_init_weights.py ...")
         subprocess.run([sys.executable, "generate_init_weights.py"], check=True)
+        path = dataset_path if dataset_path.exists() else legacy_path
     print(f"  weights  : {path}")
     return path
 
