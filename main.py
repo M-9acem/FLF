@@ -13,6 +13,7 @@ from src.models import SimpleCNN, LeNet5, ResNet8, ResNet18, ResNet50
 from src.utils import ComprehensiveLogger, get_dataset, partition_data, create_dataloaders
 from src.centralized import FedAvgClient, FedAvgServer
 from src.decentralized import P2PClient, P2PRunner, create_two_cluster_topology
+from src.decentralized.topology import create_mixing_matrix, compute_g_from_mixing_matrix
 
 
 def set_seed(seed: int):
@@ -155,6 +156,7 @@ def run_centralized(args):
             test_loader=test_loader,
             device=client_device,
             learning_rate=args.lr,
+            optimizer_name=args.optimizer,
             momentum=args.momentum,
             weight_decay=args.weight_decay
         )
@@ -305,6 +307,12 @@ def run_decentralized(args):
             intra_cluster_communication=args.intra_cluster_communication
         )
         print(f"Graph: {graph.number_of_nodes()} nodes, {graph.number_of_edges()} edges")
+
+    # Compute SSOS coefficient once from the static mixing matrix.
+    static_mixing_matrix = create_mixing_matrix(graph, args.num_clients, args.mixing_method)
+    ssos_g = compute_g_from_mixing_matrix(static_mixing_matrix)
+    if args.ssos_enabled:
+        print(f"SSOS coefficient g={ssos_g:.6f}")
     
     # Load shared initial weights w_0 so every client starts identically.
     # Prefer dataset-specific files and keep legacy fallback for compatibility.
@@ -345,6 +353,9 @@ def run_decentralized(args):
             test_loader=test_loader,
             device=client_device,
             learning_rate=args.lr,
+            ssos_enabled=args.ssos_enabled,
+            g=ssos_g,
+            optimizer_name=args.optimizer,
             momentum=args.momentum,
             weight_decay=args.weight_decay
         )
@@ -371,7 +382,7 @@ def run_decentralized(args):
         mixing_method=args.mixing_method,
         gossip_steps=args.gossip_steps,
         gossip_schedule=gossip_schedule,
-        delay_d=args.delay_d,
+        ssos_enabled=args.ssos_enabled,
         client_parallelism=args.client_parallelism,
         save_full_gradients=args.save_full_gradients,
         save_pre_gossip_weights=args.save_pre_gossip_weights,
@@ -477,6 +488,14 @@ def main():
     
     # Optimizer parameters
     parser.add_argument('--lr', type=float, default=0.01, help='Learning rate')
+    parser.add_argument('--ssos_enabled', action='store_true', help='Enable SSOS accelerated gossip updates')
+    parser.add_argument(
+        '--optimizer',
+        type=str,
+        default='sgd',
+        choices=['sgd', 'adam'],
+        help='Optimizer for local client training'
+    )
     parser.add_argument('--momentum', type=float, default=0.9, help='SGD momentum')
     parser.add_argument('--weight_decay', type=float, default=0.0, help='Weight decay')
     parser.add_argument('--batch_size', type=int, default=32, help='Batch size')

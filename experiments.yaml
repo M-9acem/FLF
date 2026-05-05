@@ -19,6 +19,8 @@
 #   init_weights: null    (auto-resolved as init_weights/<model>_w0.pt)
 #   partition_file: null  (auto-resolved as data_partition/<dataset>_N<n>_dirichlet_a0.5.pkl)
 #   methods: null         (null = run all 5 methods)
+#   optimizer: sgd
+#   ssos_enabled: false
 #   lr_schedule: false    (enable 4-phase warmup/fixed/decay schedule)
 #   warmup_epochs: 5
 #   warmup_start_lr: 0.001
@@ -34,10 +36,11 @@ experiments:
     num_clients: 40
     rounds: 400
     epochs: 2
-    delay_d: 0
     gossip_steps: 1
     dataset: cifar10
     model: resnet8
+    optimizer: sgd
+    ssos_enabled: false
     lr: 0.1
     lr_schedule: true
     warmup_epochs: 5

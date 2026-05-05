@@ -133,6 +133,24 @@ def create_mixing_matrix(
         raise ValueError(f"Unknown mixing method: {method}")
 
 
+def compute_g_from_mixing_matrix(W: np.ndarray) -> float:
+    """Compute the SSOS acceleration coefficient from a mixing matrix."""
+    if W.size == 0:
+        return 0.0
+
+    eigenvalues = np.linalg.eigvals(W)
+    spectral_radii = np.sort(np.abs(eigenvalues))[::-1]
+    rho = float(spectral_radii[1]) if spectral_radii.size > 1 else 0.0
+    rho = min(max(rho, 0.0), 0.999999999999)
+
+    inner = max(0.0, 1.0 - rho * rho)
+    root = float(np.sqrt(inner))
+    denom = 1.0 + root
+    if denom == 0.0:
+        return 0.0
+    return float((1.0 - root) / denom)
+
+
 def _metropolis_hastings_weights(graph: nx.Graph, num_clients: int) -> np.ndarray:
     """Metropolis-Hastings mixing weights.
     

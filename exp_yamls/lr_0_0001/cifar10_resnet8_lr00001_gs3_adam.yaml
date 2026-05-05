@@ -1,0 +1,14 @@
+experiments:
+- batch_size: 128
+  client_parallelism: 4
+  epochs: 2
+  gossip_steps: 3
+  lr: 0.0001
+  lr_schedule: false
+  methods:
+  - max_degree
+  name: cifar10_resnet8_lr00001_gs3_adam
+  num_clients: 40
+  optimizer: adam
+  rounds: 200
+  ssos_enabled: false

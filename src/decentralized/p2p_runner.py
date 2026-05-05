@@ -12,6 +12,7 @@ from src.decentralized.p2p_client import P2PClient
 from src.decentralized.topology import (
     get_active_edges,
     get_active_mixing_matrix,
+    create_mixing_matrix,
     MixingMethod
 )
 import networkx as nx
@@ -29,7 +30,7 @@ class P2PRunner:
         mixing_method: MixingMethod = 'metropolis_hastings',
         gossip_steps: int = 1,
         gossip_schedule: List[tuple] = None,
-        delay_d: int = 0,
+        ssos_enabled: bool = False,
         client_parallelism: int = 8,
         save_full_gradients: bool = False,
         save_pre_gossip_weights: bool = False,
@@ -48,8 +49,7 @@ class P2PRunner:
                 gossip drop schedule, e.g. [(0,5),(100,3),(200,1)] means 5 steps
                 until round 100, 3 until round 200, then 1 for remaining rounds.
                 Overrides gossip_steps when provided.
-            delay_d: Delayed aggregation depth d. If d>0, use
-                w_i(t+1)=alpha_ii*w_i(t)+sum_{j!=i} a_ij*w_j(t-d).
+            ssos_enabled: Enable static second-order schedule gossip updates.
         """
         self.clients = clients
         self.graph = graph
@@ -57,7 +57,7 @@ class P2PRunner:
         self.seed = seed
         self.mixing_method = mixing_method
         self.gossip_steps = gossip_steps
-        self.delay_d = max(0, int(delay_d))
+        self.ssos_enabled = bool(ssos_enabled)
         self.client_parallelism = max(1, int(client_parallelism))
         self.save_full_gradients = bool(save_full_gradients)
         self.save_pre_gossip_weights = bool(save_pre_gossip_weights)
@@ -75,17 +75,8 @@ class P2PRunner:
             print(f"P2P Runner initialized with mixing method: {mixing_method}, gossip schedule: [{schedule_str}]")
         else:
             print(f"P2P Runner initialized with mixing method: {mixing_method}, gossip_steps: {gossip_steps}")
-        if self.delay_d > 0:
-            print(f"Delayed aggregation enabled: d={self.delay_d}")
-            if self.logger is not None:
-                delay_buffer_dir = os.path.join(self.logger.get_log_dir(), 'delay_buffer')
-                os.environ['DELAY_BUFFER_DIR'] = delay_buffer_dir
-                print(f"Delay buffer directory: {delay_buffer_dir}")
-            delay_dbg = os.getenv('DELAY_DEBUG', '').strip().lower() in {'1', 'true', 'yes', 'on'}
-            if delay_dbg and self.logger is not None:
-                delay_log = os.path.join(self.logger.get_log_dir(), 'delay_debug.log')
-                os.environ['DELAY_DEBUG_FILE'] = delay_log
-                print(f"Delay debug log file: {delay_log}")
+        if self.ssos_enabled:
+            print("SSOS accelerated gossip enabled")
 
         if self.metric_pairs:
             print("Post-gossip weight-diff metrics configured:")
@@ -497,16 +488,13 @@ class P2PRunner:
                     if W[client.client_id, neighbor_id] > 0:
                         weights[neighbor_id] = W[client.client_id, neighbor_id]
 
-                if self.delay_d > 0:
-                    step_weight_diff = client.gossip_aggregate_with_delay(
-                        weights,
-                        self.delay_d,
-                        round_num=round_num,
-                        gossip_step=gossip_step,
-                    )
-                else:
-                    step_weight_diff = client.gossip_aggregate(weights)
+                step_weight_diff = client.gossip_aggregate(weights)
                 weight_diffs[client.client_id] += step_weight_diff
+
+            if self.ssos_enabled:
+                # Snapshot the aggregated model so the next gossip step uses it as w_i(t-1).
+                for client in self.clients:
+                    client.commit_prev_model()
 
             if self.logger:
                 pair_weight_diffs = self._compute_pair_weight_diffs()
@@ -617,10 +605,9 @@ class P2PRunner:
         
         print("\n=== Training Complete ===")
 
-        # Release delayed-buffer files after training to avoid disk buildup.
-        if self.delay_d > 0:
-            for client in self.clients:
-                client.close()
+        # Release per-client SSOS snapshots after training.
+        for client in self.clients:
+            client.close()
         
         # Save final client weights for comparison
         if self.logger and self.save_client_final_weights:

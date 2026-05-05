@@ -29,7 +29,6 @@ DEFAULTS = dict(
     epochs            = 2,
     gossip_steps      = 1,
     gossip_schedule   = None,   # e.g. "5:0,3:100,1:200" — overrides gossip_steps
-    delay_d           = 0,      # delayed aggregation depth d
     dataset           = "cifar10",
     model             = "resnet8",
     main_link_prob    = 1.0,
@@ -40,6 +39,7 @@ DEFAULTS = dict(
     partition_file    = None,   # auto-managed if None
     methods           = None,   # None → run all 5
     lr                = 0.01,
+    optimizer         = "sgd",
     momentum          = 0.9,
     weight_decay      = 0.0,
     batch_size        = 32,
@@ -47,6 +47,7 @@ DEFAULTS = dict(
     save_full_gradients = False,
     save_pre_gossip_weights = False,
     save_client_final_weights = True,
+    ssos_enabled      = False,
     lr_schedule       = False,
     warmup_epochs     = 5,
     warmup_start_lr   = 0.001,
@@ -176,8 +177,8 @@ def run_experiment(cfg: dict) -> list:
     model         = cfg["model"]
     gossip_sched  = cfg.get("gossip_schedule")
     gossip_steps  = cfg.get("gossip_steps", 1)
-    delay_d       = int(cfg.get("delay_d", 0))
     lr            = float(cfg.get("lr", 0.01))
+    optimizer     = str(cfg.get("optimizer", "sgd")).lower()
     momentum      = float(cfg.get("momentum", 0.9))
     weight_decay  = float(cfg.get("weight_decay", 0.0))
     batch_size    = int(cfg.get("batch_size", 32))
@@ -185,6 +186,7 @@ def run_experiment(cfg: dict) -> list:
     save_full_gradients = bool(cfg.get("save_full_gradients", False))
     save_pre_gossip_weights = bool(cfg.get("save_pre_gossip_weights", False))
     save_client_final_weights = bool(cfg.get("save_client_final_weights", True))
+    ssos_enabled  = bool(cfg.get("ssos_enabled", False))
     lr_schedule   = bool(cfg.get("lr_schedule", False))
     warmup_epochs = int(cfg.get("warmup_epochs", 5))
     warmup_start_lr = float(cfg.get("warmup_start_lr", 0.001))
@@ -195,9 +197,9 @@ def run_experiment(cfg: dict) -> list:
     print(f"EXPERIMENT: {exp_name}")
     print("="*70)
     print(f"  clients={n_clients}, rounds={rounds}, epochs={epochs}, {gossip_desc}")
-    print(f"  delay_d={delay_d}")
     print(f"  dataset={dataset}, model={model}")
-    print(f"  lr={lr}, momentum={momentum}, weight_decay={weight_decay}, batch_size={batch_size}")
+    print(f"  optimizer={optimizer}, lr={lr}, momentum={momentum}, weight_decay={weight_decay}, batch_size={batch_size}")
+    print(f"  ssos_enabled={ssos_enabled}")
     print(f"  client_parallelism={client_parallelism}")
     print(f"  save_full_gradients={save_full_gradients}, save_pre_gossip_weights={save_pre_gossip_weights}, save_client_final_weights={save_client_final_weights}")
     if lr_schedule:
@@ -237,8 +239,8 @@ def run_experiment(cfg: dict) -> list:
             "--num_clients",     str(n_clients),
             "--rounds",          str(rounds),
             "--epochs",          str(epochs),
-            "--delay_d",         str(delay_d),
             "--lr",              str(lr),
+            "--optimizer",       optimizer,
             "--momentum",        str(momentum),
             "--weight_decay",    str(weight_decay),
             "--batch_size",      str(batch_size),
@@ -250,6 +252,8 @@ def run_experiment(cfg: dict) -> list:
             "--init_weights",    str(init_weights),
             "--partition_file",  str(partition_path),
         ]
+        if ssos_enabled:
+            cmd += ["--ssos_enabled"]
         if gossip_sched:
             cmd += ["--gossip_schedule", gossip_sched]
         else:

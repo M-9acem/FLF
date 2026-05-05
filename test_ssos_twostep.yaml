@@ -1,0 +1,16 @@
+experiments:
+- name: ssos_twostep_smoke
+  num_clients: 4
+  rounds: 1
+  epochs: 1
+  gossip_steps: 2
+  dataset: cifar10
+  model: resnet8
+  optimizer: sgd
+  ssos_enabled: true
+  lr: 0.1
+  batch_size: 128
+  client_parallelism: 2
+  methods:
+  - max_degree
+  lr_schedule: false

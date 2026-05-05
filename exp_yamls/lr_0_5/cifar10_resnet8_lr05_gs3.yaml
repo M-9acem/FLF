@@ -10,3 +10,5 @@ experiments:
   client_parallelism: 4
   methods:
   - max_degree
+  optimizer: sgd
+  ssos_enabled: false

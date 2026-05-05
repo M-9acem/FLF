@@ -20,6 +20,7 @@ class FedAvgClient:
         test_loader: DataLoader,
         device: torch.device,
         learning_rate: float = 0.01,
+        optimizer_name: str = 'sgd',
         momentum: float = 0.9,
         weight_decay: float = 0.0
     ):
@@ -32,6 +33,7 @@ class FedAvgClient:
             test_loader: Test data loader
             device: Device to run computations
             learning_rate: Learning rate for optimizer
+            optimizer_name: Optimizer to use ('sgd' or 'adam')
             momentum: Momentum for SGD
             weight_decay: Weight decay for regularization
         """
@@ -41,8 +43,14 @@ class FedAvgClient:
         self.test_loader = test_loader
         self.device = device
         self.learning_rate = learning_rate
+        self.optimizer_name = optimizer_name.lower()
         self.momentum = momentum
         self.weight_decay = weight_decay
+
+        if self.optimizer_name not in {'sgd', 'adam'}:
+            raise ValueError(
+                f"Unsupported optimizer '{optimizer_name}'. Supported values: 'sgd', 'adam'"
+            )
         
         # Track initial model state
         self.initial_state = None
@@ -90,12 +98,19 @@ class FedAvgClient:
         """
         self.model.train()
         criterion = nn.CrossEntropyLoss()
-        optimizer = torch.optim.SGD(
-            self.model.parameters(),
-            lr=self.learning_rate,
-            momentum=self.momentum,
-            weight_decay=self.weight_decay
-        )
+        if self.optimizer_name == 'adam':
+            optimizer = torch.optim.Adam(
+                self.model.parameters(),
+                lr=self.learning_rate,
+                weight_decay=self.weight_decay,
+            )
+        else:
+            optimizer = torch.optim.SGD(
+                self.model.parameters(),
+                lr=self.learning_rate,
+                momentum=self.momentum,
+                weight_decay=self.weight_decay,
+            )
         
         epoch_losses = []
         epoch_accuracies = []
