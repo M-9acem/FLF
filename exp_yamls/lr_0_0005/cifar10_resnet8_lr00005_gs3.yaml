@@ -1,0 +1,12 @@
+experiments:
+- name: cifar10_resnet8_lr00005_gs3
+  num_clients: 40
+  rounds: 200
+  epochs: 2
+  gossip_steps: 3
+  lr: 0.0005
+  lr_schedule: false
+  batch_size: 128
+  client_parallelism: 4
+  methods:
+  - max_degree

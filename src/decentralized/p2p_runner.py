@@ -5,7 +5,6 @@ import torch.nn as nn
 import copy
 import time
 import os
-from collections import defaultdict
 from typing import List, Dict, Tuple
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -30,7 +29,11 @@ class P2PRunner:
         mixing_method: MixingMethod = 'metropolis_hastings',
         gossip_steps: int = 1,
         gossip_schedule: List[tuple] = None,
-        delay_d: int = 0
+        delay_d: int = 0,
+        client_parallelism: int = 8,
+        save_full_gradients: bool = False,
+        save_pre_gossip_weights: bool = False,
+        save_client_final_weights: bool = True,
     ):
         """Initialize P2P runner.
         
@@ -55,6 +58,10 @@ class P2PRunner:
         self.mixing_method = mixing_method
         self.gossip_steps = gossip_steps
         self.delay_d = max(0, int(delay_d))
+        self.client_parallelism = max(1, int(client_parallelism))
+        self.save_full_gradients = bool(save_full_gradients)
+        self.save_pre_gossip_weights = bool(save_pre_gossip_weights)
+        self.save_client_final_weights = bool(save_client_final_weights)
         # Sort schedule by from_round ascending
         self.gossip_schedule = sorted(gossip_schedule, key=lambda x: x[0]) if gossip_schedule else None
         self.num_clients = len(clients)
@@ -239,9 +246,8 @@ class P2PRunner:
         client_accuracies = []
         gradient_norms_list = []
         
-        # Determine number of GPUs in use
-        unique_devices = list(set(c.device for c in self.clients))
-        num_workers = len(unique_devices)
+        # Determine the concurrency level for local client training.
+        num_workers = min(self.client_parallelism, len(self.clients))
         
         def _train_p2p_client(client):
             """Train a single P2P client and return results."""
@@ -282,27 +288,16 @@ class P2PRunner:
             }
         
         if num_workers > 1:
-            # Group clients by device so each GPU is used by exactly one thread
-            gpu_groups = defaultdict(list)
-            for client in self.clients:
-                gpu_groups[str(client.device)].append(client)
-            
-            def _train_group(group_clients):
-                group_results = {}
-                for client in group_clients:
-                    result = _train_p2p_client(client)
-                    group_results[result['client_id']] = result
-                return group_results
-            
-            print(f"Training {len(self.clients)} clients in parallel across {len(gpu_groups)} GPU(s)...")
-            with ThreadPoolExecutor(max_workers=len(gpu_groups)) as executor:
-                futures = [
-                    executor.submit(_train_group, group)
-                    for group in gpu_groups.values()
-                ]
+            print(
+                f"Training {len(self.clients)} clients in parallel with "
+                f"{num_workers} worker(s)..."
+            )
+            with ThreadPoolExecutor(max_workers=num_workers) as executor:
+                futures = [executor.submit(_train_p2p_client, client) for client in self.clients]
                 results = {}
                 for future in as_completed(futures):
-                    results.update(future.result())
+                    result = future.result()
+                    results[result['client_id']] = result
         else:
             results = {}
             for client in self.clients:
@@ -318,20 +313,79 @@ class P2PRunner:
             
             print(f"Client {client.client_id}: Loss={result['final_loss']:.4f}, Acc={result['final_accuracy']:.2f}%")
         
-        # Save mean gradient tensors (original shapes) to .npz, one file per client per round
+        # Save full per-client gradient vectors only when explicitly requested.
         if self.logger:
-            all_grad_dir = os.path.join(self.logger.get_log_dir(), 'all_gradients')
-            os.makedirs(all_grad_dir, exist_ok=True)
-            for client in self.clients:
-                grad_vec = results[client.client_id].get('last_grad_vec')
-                if grad_vec is not None:
-                    npy_path = os.path.join(all_grad_dir, f'client_{client.client_id}_round_{round_num}.npy')
-                    np.save(npy_path, grad_vec)
+            if self.save_full_gradients:
+                all_grad_dir = os.path.join(self.logger.get_log_dir(), 'all_gradients')
+                os.makedirs(all_grad_dir, exist_ok=True)
+                for client in self.clients:
+                    grad_vec = results[client.client_id].get('last_grad_vec')
+                    if grad_vec is not None:
+                        npy_path = os.path.join(all_grad_dir, f'client_{client.client_id}_round_{round_num}.npy')
+                        np.save(npy_path, grad_vec)
         
         # Save pre-gossip weights and test metrics (before Phase 2)
         if self.logger:
             pre_gossip_states = {c.client_id: results[c.client_id]['state'] for c in self.clients}
-            self.logger.save_pre_gossip_weights(pre_gossip_states, round_num)
+            if self.save_pre_gossip_weights:
+                self.logger.save_pre_gossip_weights(pre_gossip_states, round_num)
+            num_samples_map = {c.client_id: results[c.client_id].get('num_samples') or 1
+                               for c in self.clients}
+            total_samples = sum(num_samples_map.values())
+
+            def _evaluate_weighted_average_model(state_map):
+                avg_state = {}
+                for key in state_map[self.clients[0].client_id].keys():
+                    avg_state[key] = sum(
+                        state_map[cid][key].float() * (num_samples_map[cid] / total_samples)
+                        for cid in num_samples_map
+                    )
+
+                tmp_model = copy.deepcopy(self.clients[0].model)
+                tmp_model.load_state_dict(avg_state)
+                tmp_model.eval()
+                criterion = nn.CrossEntropyLoss()
+                total_loss, correct, total = 0.0, 0, 0
+                num_classes = 10
+                class_correct = [0] * num_classes
+                class_total = [0] * num_classes
+                all_targets, all_preds = [], []
+                with torch.no_grad():
+                    for data, target in self.clients[0].test_loader:
+                        data, target = data.to(self.clients[0].device), target.to(self.clients[0].device)
+                        output = tmp_model(data)
+                        total_loss += criterion(output, target).item()
+                        pred = output.argmax(dim=1)
+                        correct += pred.eq(target).sum().item()
+                        total += target.size(0)
+                        all_targets.extend(target.cpu().numpy())
+                        all_preds.extend(pred.cpu().numpy())
+                        for i in range(len(target)):
+                            lbl = target[i].item()
+                            class_correct[lbl] += (pred[i] == target[i]).item()
+                            class_total[lbl] += 1
+
+                avg_acc = 100.0 * correct / total
+                avg_loss = total_loss / len(self.clients[0].test_loader)
+                class_metrics = {}
+                for cls in range(num_classes):
+                    if class_total[cls] > 0:
+                        from sklearn.metrics import precision_score, recall_score, f1_score
+                        import numpy as _np
+                        t = _np.array(all_targets)
+                        p = _np.array(all_preds)
+                        class_metrics[cls] = {
+                            'accuracy': 100.0 * class_correct[cls] / class_total[cls],
+                            'precision': precision_score(t == cls, p == cls, zero_division=0),
+                            'recall': recall_score(t == cls, p == cls, zero_division=0),
+                            'f1_score': f1_score(t == cls, p == cls, zero_division=0),
+                        }
+                    else:
+                        class_metrics[cls] = {'accuracy': 0.0, 'precision': 0.0, 'recall': 0.0, 'f1_score': 0.0}
+
+                del tmp_model
+                return avg_acc, avg_loss, class_metrics
+
             for client in self.clients:
                 result = results[client.client_id]
                 if result['test_metrics']:
@@ -355,69 +409,32 @@ class P2PRunner:
                         round_num=round_num,
                         lr_history=result.get('lr_history', [])
                     )
+            # Log scalar weighted gradient sum norm per round to reduce disk usage.
+            grad_weighted_sum = None
+            for cid, n_samples in num_samples_map.items():
+                grad_vec = results[cid].get('last_grad_vec')
+                if grad_vec is None:
+                    grad_weighted_sum = None
+                    break
+                coeff = float(n_samples) / float(total_samples)
+                contribution = coeff * grad_vec
+                grad_weighted_sum = contribution if grad_weighted_sum is None else grad_weighted_sum + contribution
 
-        # Compute and evaluate the weighted-average (virtual FedAvg) model pre-gossip
-        if self.logger:
-            num_samples_map = {c.client_id: results[c.client_id].get('num_samples') or 1
-                               for c in self.clients}
-            total_samples = sum(num_samples_map.values())
-
-            # Build weighted-average state dict
-            avg_state = {}
-            for key in pre_gossip_states[self.clients[0].client_id].keys():
-                avg_state[key] = sum(
-                    pre_gossip_states[cid][key].float() * (num_samples_map[cid] / total_samples)
-                    for cid in num_samples_map
+            if grad_weighted_sum is not None:
+                weighted_grad_sum_norm_l2 = float(np.linalg.norm(grad_weighted_sum, ord=2))
+                self.logger.log_weighted_gradient_sum_norm(
+                    round_num=round_num,
+                    weighted_grad_sum_norm_l2=weighted_grad_sum_norm_l2,
                 )
 
-            # Load into a temporary model copy and evaluate on the global test set
-            tmp_model = copy.deepcopy(self.clients[0].model)
-            tmp_model.load_state_dict(avg_state)
-            tmp_model.eval()
-            criterion = nn.CrossEntropyLoss()
-            total_loss, correct, total = 0.0, 0, 0
-            num_classes = 10
-            class_correct = [0] * num_classes
-            class_total = [0] * num_classes
-            all_targets, all_preds = [], []
-            with torch.no_grad():
-                for data, target in self.clients[0].test_loader:
-                    data, target = data.to(self.clients[0].device), target.to(self.clients[0].device)
-                    output = tmp_model(data)
-                    total_loss += criterion(output, target).item()
-                    pred = output.argmax(dim=1)
-                    correct += pred.eq(target).sum().item()
-                    total += target.size(0)
-                    all_targets.extend(target.cpu().numpy())
-                    all_preds.extend(pred.cpu().numpy())
-                    for i in range(len(target)):
-                        lbl = target[i].item()
-                        class_correct[lbl] += (pred[i] == target[i]).item()
-                        class_total[lbl] += 1
-            avg_acc = 100.0 * correct / total
-            avg_loss = total_loss / len(self.clients[0].test_loader)
-            class_metrics = {}
-            for cls in range(num_classes):
-                if class_total[cls] > 0:
-                    from sklearn.metrics import precision_score, recall_score, f1_score
-                    import numpy as _np
-                    t = _np.array(all_targets)
-                    p = _np.array(all_preds)
-                    class_metrics[cls] = {
-                        'accuracy': 100.0 * class_correct[cls] / class_total[cls],
-                        'precision': precision_score(t == cls, p == cls, zero_division=0),
-                        'recall': recall_score(t == cls, p == cls, zero_division=0),
-                        'f1_score': f1_score(t == cls, p == cls, zero_division=0),
-                    }
-                else:
-                    class_metrics[cls] = {'accuracy': 0.0, 'precision': 0.0, 'recall': 0.0, 'f1_score': 0.0}
-            del tmp_model
+            pre_avg_acc, pre_avg_loss, pre_class_metrics = _evaluate_weighted_average_model(pre_gossip_states)
             self.logger.log_global_aggregated_metrics(
                 round_num=round_num,
-                test_accuracy=avg_acc,
-                test_loss=avg_loss,
-                class_metrics=class_metrics,
-                total_samples=total_samples
+                test_accuracy=pre_avg_acc,
+                test_loss=pre_avg_loss,
+                class_metrics=pre_class_metrics,
+                total_samples=total_samples,
+                gossip_step=-1,
             )
 
         # Resolve effective gossip steps for this round (schedule or fixed)
@@ -436,6 +453,12 @@ class P2PRunner:
         
         # Accumulate total weight diff across all gossip steps
         weight_diffs = {c.client_id: 0.0 for c in self.clients}
+        pair_weight_diffs = {}
+        eval_losses = []
+        eval_accuracies = []
+        avg_loss = 0.0
+        avg_accuracy = 0.0
+        std_accuracy = 0.0
         
         for gossip_step in range(effective_gossip_steps):
             # Determine active edges for this round
@@ -484,50 +507,75 @@ class P2PRunner:
                 else:
                     step_weight_diff = client.gossip_aggregate(weights)
                 weight_diffs[client.client_id] += step_weight_diff
-        
+
+            if self.logger:
+                pair_weight_diffs = self._compute_pair_weight_diffs()
+                self.logger.log_p2p_pair_weight_diffs(
+                    round_num=round_num,
+                    gossip_step=gossip_step,
+                    metric_values=pair_weight_diffs,
+                    metric_pairs=self.metric_pairs,
+                )
+
+                current_states = {c.client_id: c.get_state() for c in self.clients}
+                avg_acc, avg_loss, class_metrics = _evaluate_weighted_average_model(current_states)
+                self.logger.log_global_aggregated_metrics(
+                    round_num=round_num,
+                    test_accuracy=avg_acc,
+                    test_loss=avg_loss,
+                    class_metrics=class_metrics,
+                    total_samples=total_samples,
+                    gossip_step=gossip_step,
+                )
+
+                step_eval_losses = []
+                step_eval_accuracies = []
+                for client in self.clients:
+                    post_gossip_metrics = client.evaluate(compute_per_class_metrics=True)
+                    step_eval_losses.append(post_gossip_metrics['loss'])
+                    step_eval_accuracies.append(post_gossip_metrics['accuracy'])
+
+                    result = results[client.client_id]
+                    cluster_id = self.cluster_assignments.get(client.client_id)
+                    self.logger.log_p2p_round_metrics(
+                        client_id=client.client_id,
+                        round_num=round_num,
+                        test_accuracy=post_gossip_metrics['accuracy'],
+                        test_loss=post_gossip_metrics['loss'],
+                        class_metrics=post_gossip_metrics.get('class_metrics', {}),
+                        cluster_id=cluster_id,
+                        train_accuracy=result['final_accuracy'],
+                        train_loss=result['final_loss'],
+                        num_samples=result.get('num_samples'),
+                        current_lr=result.get('current_lr'),
+                        gossip_step=gossip_step,
+                    )
+
+                eval_losses = step_eval_losses
+                eval_accuracies = step_eval_accuracies
+                avg_loss = np.mean(eval_losses)
+                avg_accuracy = np.mean(eval_accuracies)
+                std_accuracy = np.std(eval_accuracies)
+
+                print(f"  Gossip step {gossip_step + 1}/{effective_gossip_steps}: Average - Loss: {avg_loss:.4f}, Acc: {avg_accuracy:.2f}% (±{std_accuracy:.2f}%)")
+
         communication_time = time.time() - communication_start
         print(f"Communication took {communication_time:.2f}s")
 
-        pair_weight_diffs = self._compute_pair_weight_diffs()
-        if self.logger:
-            self.logger.log_p2p_pair_weight_diffs(
-                round_num=round_num,
-                metric_values=pair_weight_diffs,
-                metric_pairs=self.metric_pairs,
-            )
-        
-        # Phase 3: Evaluation (post-gossip) + metric logging
-        print("Phase 3: Evaluation...")
-        eval_losses = []
-        eval_accuracies = []
-        
-        for client in self.clients:
-            compute_per_class = self.logger is not None
-            post_gossip_metrics = client.evaluate(compute_per_class_metrics=compute_per_class)
-            eval_losses.append(post_gossip_metrics['loss'])
-            eval_accuracies.append(post_gossip_metrics['accuracy'])
-            
-            if self.logger:
-                result = results[client.client_id]
-                cluster_id = self.cluster_assignments.get(client.client_id)
-                self.logger.log_p2p_round_metrics(
-                    client_id=client.client_id,
-                    round_num=round_num,
-                    test_accuracy=post_gossip_metrics['accuracy'],
-                    test_loss=post_gossip_metrics['loss'],
-                    class_metrics=post_gossip_metrics.get('class_metrics', {}),
-                    cluster_id=cluster_id,
-                    train_accuracy=result['final_accuracy'],
-                    train_loss=result['final_loss'],
-                    num_samples=result.get('num_samples'),
-                    current_lr=result.get('current_lr')
-                )
-        
-        avg_loss = np.mean(eval_losses)
-        avg_accuracy = np.mean(eval_accuracies)
-        std_accuracy = np.std(eval_accuracies)
-        
-        print(f"Average - Loss: {avg_loss:.4f}, Acc: {avg_accuracy:.2f}% (±{std_accuracy:.2f}%)")
+        if not self.logger:
+            print("Phase 3: Evaluation...")
+            for client in self.clients:
+                post_gossip_metrics = client.evaluate(compute_per_class_metrics=False)
+                eval_losses.append(post_gossip_metrics['loss'])
+                eval_accuracies.append(post_gossip_metrics['accuracy'])
+
+            avg_loss = np.mean(eval_losses)
+            avg_accuracy = np.mean(eval_accuracies)
+            std_accuracy = np.std(eval_accuracies)
+
+            print(f"Average - Loss: {avg_loss:.4f}, Acc: {avg_accuracy:.2f}% (±{std_accuracy:.2f}%)")
+        elif eval_losses:
+            print(f"Average - Loss: {avg_loss:.4f}, Acc: {avg_accuracy:.2f}% (±{std_accuracy:.2f}%)")
         
         return {
             'round': round_num,
@@ -575,6 +623,6 @@ class P2PRunner:
                 client.close()
         
         # Save final client weights for comparison
-        if self.logger:
+        if self.logger and self.save_client_final_weights:
             self.logger.save_client_final_weights(self.clients)
             self.logger.plot_p2p_pair_weight_diffs()

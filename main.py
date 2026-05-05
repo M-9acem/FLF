@@ -142,6 +142,7 @@ def run_centralized(args):
     
     # Create clients (distributed across GPUs round-robin)
     print(f"Initializing {args.num_clients} clients across {len(devices)} device(s)...")
+    print(f"Client training parallelism: {args.client_parallelism}")
     clients = []
     for i in range(args.num_clients):
         client_device = devices[i % len(devices)]
@@ -168,7 +169,8 @@ def run_centralized(args):
         model=global_model,
         clients=clients,
         device=device,
-        logger=logger
+        logger=logger,
+        client_parallelism=args.client_parallelism,
     )
     
     # Train
@@ -369,7 +371,11 @@ def run_decentralized(args):
         mixing_method=args.mixing_method,
         gossip_steps=args.gossip_steps,
         gossip_schedule=gossip_schedule,
-        delay_d=args.delay_d
+        delay_d=args.delay_d,
+        client_parallelism=args.client_parallelism,
+        save_full_gradients=args.save_full_gradients,
+        save_pre_gossip_weights=args.save_pre_gossip_weights,
+        save_client_final_weights=args.save_client_final_weights,
     )
     
     # Save network topology visualization
@@ -410,7 +416,10 @@ def run_decentralized(args):
     print(f"  - pre_gossip_weights/ (model weights before gossip, per round)")
     print(f"  - global_aggregated_metrics.csv (weighted-avg model pre-gossip, per round)")
     print(f"  - global_aggregated_per_class_metrics.csv (per-class metrics of aggregated model)")
-    print(f"  - client_final_weights.pt (final model state dicts after gossip)")
+    if args.save_client_final_weights:
+        print(f"  - client_final_weights.pt (final model state dicts after gossip)")
+    else:
+        print(f"  - client_final_weights.pt (skipped)")
     print(f"  - network_topology.html (interactive network visualization)")
     print(f"  - topology_info.txt (network statistics)")
 
@@ -507,6 +516,15 @@ def main():
     # System parameters
     parser.add_argument('--no_cuda', action='store_true', help='Disable CUDA')
     parser.add_argument('--num_workers', type=int, default=0, help='Number of data loading workers')
+    parser.add_argument('--client_parallelism', type=int, default=8,
+        help='Maximum number of clients to train concurrently per round')
+    parser.add_argument('--save_full_gradients', action='store_true',
+        help='If set, save full per-client gradient vectors each round (high disk usage)')
+    parser.add_argument('--save_pre_gossip_weights', action='store_true',
+        help='If set, save full pre-gossip model state dicts each round (high disk usage)')
+    parser.add_argument('--no_save_client_final_weights', action='store_false', dest='save_client_final_weights',
+        help='If set, skip saving client_final_weights.pt at the end of decentralized training')
+    parser.set_defaults(save_client_final_weights=True)
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
     parser.add_argument('--init_weights', type=str, default=None,
         help='Path to a w_0.pt file. Defaults to init_weights/<model>_<dataset>_w0.pt '

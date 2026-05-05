@@ -1,0 +1,12 @@
+experiments:
+- name: test_shared_resources
+  num_clients: 40
+  rounds: 1
+  epochs: 1
+  gossip_steps: 1
+  lr: 0.1
+  lr_schedule: false
+  batch_size: 128
+  client_parallelism: 4
+  methods:
+  - max_degree

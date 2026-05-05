@@ -606,7 +606,8 @@ class ComprehensiveLogger:
         test_accuracy: float,
         test_loss: float,
         class_metrics: Dict[int, Dict[str, float]],
-        total_samples: int = None
+        total_samples: int = None,
+        gossip_step: int = None,
     ):
         """Log test metrics for the weighted-average (virtual FedAvg) model computed
         pre-gossip from all client models weighted by their training sample counts.
@@ -624,22 +625,22 @@ class ComprehensiveLogger:
         if not csv_file.exists():
             with open(csv_file, 'w', newline='') as f:
                 writer = csv.writer(f)
-                writer.writerow(['round', 'timestamp', 'elapsed_seconds', 'test_accuracy', 'test_loss', 'total_samples'])
+                writer.writerow(['round', 'gossip_step', 'timestamp', 'elapsed_seconds', 'test_accuracy', 'test_loss', 'total_samples'])
         with open(csv_file, 'a', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow([round_num, timestamp, elapsed_seconds, test_accuracy, test_loss, total_samples])
+            writer.writerow([round_num, gossip_step, timestamp, elapsed_seconds, test_accuracy, test_loss, total_samples])
 
         class_csv_file = self.exp_dir / "global_aggregated_per_class_metrics.csv"
         if not class_csv_file.exists():
             with open(class_csv_file, 'w', newline='') as f:
                 writer = csv.writer(f)
-                writer.writerow(['round', 'timestamp', 'elapsed_seconds', 'class_id',
+                writer.writerow(['round', 'gossip_step', 'timestamp', 'elapsed_seconds', 'class_id',
                                  'class_accuracy', 'class_precision', 'class_recall', 'class_f1_score'])
         with open(class_csv_file, 'a', newline='') as f:
             writer = csv.writer(f)
             for class_id, metrics in class_metrics.items():
                 writer.writerow([
-                    round_num, timestamp, elapsed_seconds, class_id,
+                    round_num, gossip_step, timestamp, elapsed_seconds, class_id,
                     metrics.get('accuracy', 0.0),
                     metrics.get('precision', 0.0),
                     metrics.get('recall', 0.0),
@@ -796,7 +797,8 @@ class ComprehensiveLogger:
         train_accuracy: float = None,
         train_loss: float = None,
         num_samples: int = None,
-        current_lr: float = None
+        current_lr: float = None,
+        gossip_step: int = None,
     ):
         """Simplified logging method for P2P decentralized experiments.
         
@@ -823,7 +825,7 @@ class ComprehensiveLogger:
             with open(p2p_file, 'w', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow([
-                    'client_id', 'round', 'timestamp', 'elapsed_seconds', 'cluster_id',
+                    'client_id', 'round', 'gossip_step', 'timestamp', 'elapsed_seconds', 'cluster_id',
                     'train_accuracy', 'train_loss',
                     'test_accuracy', 'test_loss',
                     'num_samples', 'current_lr'
@@ -833,7 +835,7 @@ class ComprehensiveLogger:
         with open(p2p_file, 'a', newline='') as f:
             writer = csv.writer(f)
             writer.writerow([
-                client_id, round_num, timestamp, elapsed_seconds, cluster_id,
+                client_id, round_num, gossip_step, timestamp, elapsed_seconds, cluster_id,
                 train_accuracy, train_loss,
                 test_accuracy, test_loss,
                 num_samples, current_lr
@@ -845,7 +847,7 @@ class ComprehensiveLogger:
             with open(p2p_class_file, 'w', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow([
-                    'client_id', 'round', 'timestamp', 'elapsed_seconds', 'cluster_id', 'class_id',
+                    'client_id', 'round', 'gossip_step', 'timestamp', 'elapsed_seconds', 'cluster_id', 'class_id',
                     'class_accuracy', 'class_precision', 'class_recall', 'class_f1_score'
                 ])
 
@@ -854,7 +856,7 @@ class ComprehensiveLogger:
             writer = csv.writer(f)
             for class_id, metrics in class_metrics.items():
                 writer.writerow([
-                    client_id, round_num, timestamp, elapsed_seconds, cluster_id, class_id,
+                    client_id, round_num, gossip_step, timestamp, elapsed_seconds, cluster_id, class_id,
                     metrics.get('accuracy', 0.0),
                     metrics.get('precision', 0.0),
                     metrics.get('recall', 0.0),
@@ -907,6 +909,7 @@ class ComprehensiveLogger:
     def log_p2p_pair_weight_diffs(
         self,
         round_num: int,
+        gossip_step: int,
         metric_values: Dict[str, float],
         metric_pairs: Dict[str, Tuple[int, int]]
     ):
@@ -924,7 +927,7 @@ class ComprehensiveLogger:
             with open(csv_file, 'w', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow([
-                    'round', 'timestamp', 'elapsed_seconds', 'metric_name', 'node_i', 'node_j', 'weight_diff_l2'
+                    'round', 'gossip_step', 'timestamp', 'elapsed_seconds', 'metric_name', 'node_i', 'node_j', 'weight_diff_l2'
                 ])
 
         with open(csv_file, 'a', newline='') as f:
@@ -933,6 +936,7 @@ class ComprehensiveLogger:
                 node_i, node_j = metric_pairs[metric_name]
                 writer.writerow([
                     round_num,
+                    gossip_step,
                     timestamp,
                     elapsed_seconds,
                     metric_name,
@@ -940,6 +944,35 @@ class ComprehensiveLogger:
                     int(node_j),
                     float(value)
                 ])
+
+    def log_weighted_gradient_sum_norm(
+        self,
+        round_num: int,
+        weighted_grad_sum_norm_l2: float,
+    ):
+        """Log the scalar weighted gradient sum norm for one round.
+
+        This stores only a per-round scalar to keep disk usage low compared to
+        saving full gradient vectors for every client and round.
+        """
+        timestamp, elapsed_seconds = self._time_fields()
+
+        csv_file = self.exp_dir / "weighted_gradient_sum_norm.csv"
+        if not csv_file.exists():
+            with open(csv_file, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    'round', 'timestamp', 'elapsed_seconds', 'weighted_grad_sum_norm_l2'
+                ])
+
+        with open(csv_file, 'a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                round_num,
+                timestamp,
+                elapsed_seconds,
+                float(weighted_grad_sum_norm_l2),
+            ])
 
     def plot_p2p_pair_weight_diffs(self):
         """Plot all named pairwise post-gossip weight-diff metrics across rounds."""

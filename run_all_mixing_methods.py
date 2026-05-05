@@ -43,6 +43,10 @@ DEFAULTS = dict(
     momentum          = 0.9,
     weight_decay      = 0.0,
     batch_size        = 32,
+    client_parallelism= 8,
+    save_full_gradients = False,
+    save_pre_gossip_weights = False,
+    save_client_final_weights = True,
     lr_schedule       = False,
     warmup_epochs     = 5,
     warmup_start_lr   = 0.001,
@@ -177,6 +181,10 @@ def run_experiment(cfg: dict) -> list:
     momentum      = float(cfg.get("momentum", 0.9))
     weight_decay  = float(cfg.get("weight_decay", 0.0))
     batch_size    = int(cfg.get("batch_size", 32))
+    client_parallelism = int(cfg.get("client_parallelism", 8))
+    save_full_gradients = bool(cfg.get("save_full_gradients", False))
+    save_pre_gossip_weights = bool(cfg.get("save_pre_gossip_weights", False))
+    save_client_final_weights = bool(cfg.get("save_client_final_weights", True))
     lr_schedule   = bool(cfg.get("lr_schedule", False))
     warmup_epochs = int(cfg.get("warmup_epochs", 5))
     warmup_start_lr = float(cfg.get("warmup_start_lr", 0.001))
@@ -190,7 +198,12 @@ def run_experiment(cfg: dict) -> list:
     print(f"  delay_d={delay_d}")
     print(f"  dataset={dataset}, model={model}")
     print(f"  lr={lr}, momentum={momentum}, weight_decay={weight_decay}, batch_size={batch_size}")
-    print(f"  lr_schedule={lr_schedule}, warmup_epochs={warmup_epochs}, warmup_start_lr={warmup_start_lr}")
+    print(f"  client_parallelism={client_parallelism}")
+    print(f"  save_full_gradients={save_full_gradients}, save_pre_gossip_weights={save_pre_gossip_weights}, save_client_final_weights={save_client_final_weights}")
+    if lr_schedule:
+        print(f"  lr_schedule={lr_schedule}, warmup_epochs={warmup_epochs}, warmup_start_lr={warmup_start_lr}")
+    else:
+        print(f"  lr_schedule={lr_schedule}")
 
     topology_path  = resolve_topology(cfg)
     init_weights   = resolve_init_weights(cfg)
@@ -229,6 +242,7 @@ def run_experiment(cfg: dict) -> list:
             "--momentum",        str(momentum),
             "--weight_decay",    str(weight_decay),
             "--batch_size",      str(batch_size),
+            "--client_parallelism", str(client_parallelism),
             "--dataset",         dataset,
             "--model",           model,
             "--experiment_name", full_exp_name,
@@ -247,6 +261,15 @@ def run_experiment(cfg: dict) -> list:
                 "--warmup_epochs", str(warmup_epochs),
                 "--warmup_start_lr", str(warmup_start_lr),
             ]
+
+        if save_full_gradients:
+            cmd += ["--save_full_gradients"]
+
+        if save_pre_gossip_weights:
+            cmd += ["--save_pre_gossip_weights"]
+
+        if not save_client_final_weights:
+            cmd += ["--no_save_client_final_weights"]
 
         method_start = datetime.now()
         try:

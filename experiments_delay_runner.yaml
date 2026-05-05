@@ -1,9 +1,0 @@
-experiments:
-  - name: delay_runner
-    num_clients: 6
-    rounds: 10
-    epochs: 1
-    delay_d: 3
-    dataset: cifar10
-    model: lenet5
-    methods: [max_degree]

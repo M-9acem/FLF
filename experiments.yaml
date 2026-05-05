@@ -22,23 +22,31 @@
 #   lr_schedule: false    (enable 4-phase warmup/fixed/decay schedule)
 #   warmup_epochs: 5
 #   warmup_start_lr: 0.001
+#   client_parallelism: 8 (max concurrent clients trained per round)
+#   save_full_gradients: false (true = save full per-client gradient vectors)
+#   save_pre_gossip_weights: false (true = save full pre-gossip model weights)
+#   save_client_final_weights: true (false = skip client_final_weights.pt)
 
 experiments:
 
-  # ── MNIST + LeNet5 with the new 4-phase LR schedule ──
-  - name: mnist_lenet5_lr_sched_20r
-    num_clients: 4
-    rounds: 20
-    epochs: 1
+  # ── CIFAR-10 + ResNet8 with the new 4-phase LR schedule ──
+  - name: cifar10_resnet8_lr_sched_20r
+    num_clients: 40
+    rounds: 400
+    epochs: 2
     delay_d: 0
     gossip_steps: 1
-    dataset: mnist
-    model: lenet5
+    dataset: cifar10
+    model: resnet8
     lr: 0.1
     lr_schedule: true
     warmup_epochs: 5
     warmup_start_lr: 0.001
-    batch_size: 64
+    batch_size: 128
+    client_parallelism: 8
+    save_full_gradients: false
+    save_pre_gossip_weights: false
+    save_client_final_weights: false
     methods: [max_degree]
 
   # ── Max Degree + Jaccard Similarity only, N=40, fixed gossip steps/round ──

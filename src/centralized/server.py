@@ -1,7 +1,6 @@
 """FedAvg server implementation."""
 
 import time
-from collections import defaultdict
 
 import torch
 import torch.nn as nn
@@ -20,7 +19,8 @@ class FedAvgServer:
         model: nn.Module,
         clients: List[FedAvgClient],
         device: torch.device,
-        logger: 'ComprehensiveLogger' = None
+        logger: 'ComprehensiveLogger' = None,
+        client_parallelism: int = 8,
     ):
         """Initialize FedAvg server.
         
@@ -34,6 +34,7 @@ class FedAvgServer:
         self.clients = clients
         self.device = device
         self.logger = logger
+        self.client_parallelism = max(1, int(client_parallelism))
         self.prev_global_gradient_norm = None
         
         # Initialize all clients with global model
@@ -103,9 +104,8 @@ class FedAvgServer:
         client_accuracies = []
         gradient_norms_list = []
         
-        # Determine number of GPUs in use
-        unique_devices = list(set(c.device for c in self.clients))
-        num_workers = len(unique_devices)
+        # Determine the concurrency level for local client training.
+        num_workers = min(self.client_parallelism, len(self.clients))
         
         def _train_client(client, local_epochs):
             """Train a single client and return results."""
@@ -145,29 +145,18 @@ class FedAvgServer:
                 'test_metrics': test_metrics
             }
         
-        # Train clients in parallel (one thread per GPU)
+        # Train clients in parallel up to the configured concurrency limit.
         if num_workers > 1:
-            # Group clients by device so each GPU is used by exactly one thread
-            gpu_groups = defaultdict(list)
-            for client in self.clients:
-                gpu_groups[str(client.device)].append(client)
-            
-            def _train_group(group_clients):
-                group_results = {}
-                for client in group_clients:
-                    result = _train_client(client, local_epochs)
-                    group_results[result['client'].client_id] = result
-                return group_results
-            
-            print(f"Training {len(self.clients)} clients in parallel across {len(gpu_groups)} GPU(s)...")
-            with ThreadPoolExecutor(max_workers=len(gpu_groups)) as executor:
-                futures = [
-                    executor.submit(_train_group, group)
-                    for group in gpu_groups.values()
-                ]
+            print(
+                f"Training {len(self.clients)} clients in parallel with "
+                f"{num_workers} worker(s)..."
+            )
+            with ThreadPoolExecutor(max_workers=num_workers) as executor:
+                futures = [executor.submit(_train_client, client, local_epochs) for client in self.clients]
                 results = {}
                 for future in as_completed(futures):
-                    results.update(future.result())
+                    result = future.result()
+                    results[result['client'].client_id] = result
             
             # Collect results in order
             for client in self.clients:
