@@ -440,6 +440,13 @@ class P2PRunner:
         # Phase 2: Gossip aggregation (repeated effective_gossip_steps times)
         print(f"Phase 2: Gossip aggregation ({effective_gossip_steps} step(s))...")
         
+        # Reset SSOS history at the start of each round's gossip phase
+        # This ensures the first gossip step uses standard averaging (no momentum)
+        # and subsequent steps build up momentum from the first aggregated state
+        if self.ssos_enabled:
+            for client in self.clients:
+                client.reset_prev_model()
+        
         communication_start = time.time()
         
         # Accumulate total weight diff across all gossip steps

@@ -321,6 +321,10 @@ class P2PClient:
                 for key in current_state.keys():
                     aggregated_state[key] += neighbor_state[key].float() * weight
 
+        # Debug: log aggregated state norm before momentum
+        agg_vec = torch.cat([v.flatten().float() for v in aggregated_state.values()])
+        agg_norm = agg_vec.norm(2).item()
+        
         if self.ssos_enabled and self.prev_model is not None:
             accelerated_state = {}
             for key in current_state.keys():
@@ -329,6 +333,26 @@ class P2PClient:
                     - self.g * self.prev_model[key].float()
                 )
             aggregated_state = accelerated_state
+            
+            # Debug: log momentum calculation
+            accel_vec = torch.cat([v.flatten().float() for v in accelerated_state.values()])
+            accel_norm = accel_vec.norm(2).item()
+            momentum_contribution = accel_norm - agg_norm
+            import os
+            debug_mode = os.getenv('SSOS_DEBUG', '').strip().lower() in {'1', 'true', 'yes'}
+            if debug_mode:
+                print(f"[SSOS] Client {self.client_id}: "
+                      f"g={self.g:.6f}, "
+                      f"aggregated_norm={agg_norm:.6f}, "
+                      f"accelerated_norm={accel_norm:.6f}, "
+                      f"momentum_delta={momentum_contribution:+.6f}")
+        elif self.ssos_enabled and self.prev_model is None:
+            import os
+            debug_mode = os.getenv('SSOS_DEBUG', '').strip().lower() in {'1', 'true', 'yes'}
+            if debug_mode:
+                print(f"[SSOS] Client {self.client_id}: "
+                      f"NO momentum (prev_model=None, first gossip step), "
+                      f"aggregated_norm={agg_norm:.6f}")
         
         # Flatten post-aggregation weights into a single vector
         post_vec = torch.cat([v.flatten().float() for v in aggregated_state.values()])

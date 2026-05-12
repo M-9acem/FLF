@@ -1,0 +1,20 @@
+experiments:
+- name: smoke_test_ssos_gs3_r5_n4
+  num_clients: 4
+  rounds: 5
+  epochs: 1
+  gossip_steps: 3
+  lr: 0.01
+  lr_schedule: false
+  batch_size: 32
+  client_parallelism: 2
+  methods:
+  - max_degree
+  optimizer: sgd
+  momentum: 0.9
+  weight_decay: 0
+  dataset: cifar10
+  model: lenet5
+  partition: dirichlet
+  alpha: 0.5
+  ssos_enabled: true
